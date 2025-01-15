@@ -1,8 +1,10 @@
 const express = require('express');
 const multer = require('multer');
+const db = require('./config/db');
 const axios = require('axios');
 const dotenv = require('dotenv');
 const FormData = require('form-data');
+const AuthController = require('./controller/AuthController');
 
 // Initialize dotenv
 dotenv.config();
@@ -28,6 +30,11 @@ let fileStorage = {};
 // Multer configuration for handling file uploads
 const storage = multer.memoryStorage(); // Store files in memory (not disk)
 const upload = multer({ storage });
+
+app.post('/login', AuthController.login);
+app.post('/register', AuthController.register);
+
+
 
 // Upload endpoint for receiving file and code
 app.post('/upload', upload.single('file'), async (req, res) => {
