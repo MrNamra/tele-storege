@@ -5,6 +5,7 @@ const axios = require('axios');
 const dotenv = require('dotenv');
 const FormData = require('form-data');
 const AuthController = require('./controller/AuthController');
+const UserRoutes = require('./routes/user');
 
 // Initialize dotenv
 dotenv.config();
@@ -34,68 +35,7 @@ const upload = multer({ storage });
 app.post('/login', AuthController.login);
 app.post('/register', AuthController.register);
 
-
-
-// Upload endpoint for receiving file and code
-app.post('/upload', upload.single('file'), async (req, res) => {
-  try {
-    // Check if file is uploaded
-    if (!req.file) {
-      return res.status(400).json({ success: false, message: 'No file uploaded.' });
-    }
-
-    // Extract the code from the form data
-    const { code } = req.body;
-    
-    // Check if code is provided
-    if (!code) {
-      return res.status(400).json({ success: false, message: 'Code is required.' });
-    }
-
-    // Upload the file to Telegram
-    const result = await uploadToTelegram(req.file);
-
-    // Store file metadata in memory under the code
-    if (!fileStorage[code]) {
-      fileStorage[code] = [];
-    }
-    fileStorage[code].push({
-      fileName: req.file.originalname,
-      fileSize: req.file.size,
-      telegramResponse: result
-    });
-
-    // Respond to the client with success message
-    res.status(200).json({
-      success: true,
-      message: 'File uploaded successfully!',
-      telegram_response: result
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: 'Error uploading file.' });
-  }
-});
-
-// Function to upload file directly to Telegram without storing it on the server
-async function uploadToTelegram(file) {
-  try {
-    const form = new FormData();
-    form.append('chat_id', CHAT_ID);
-    form.append('document', file.buffer, { filename: file.originalname });
-
-    const response = await axios.post(TELEGRAM_API_URL, form, {
-      headers: {
-        ...form.getHeaders(),
-      }
-    });
-
-    return response.data; // Return Telegram response
-  } catch (error) {
-    console.error('Error uploading to Telegram:', error);
-    throw new Error('Failed to upload to Telegram.');
-  }
-}
+app.use('/user', UserRoutes);
 
 // Route to serve the index.html file when the user accesses the root route "/"
 app.get('/', (req, res) => {

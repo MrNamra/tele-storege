@@ -20,6 +20,11 @@ const UserSchema = mongoose.Schema({
         enum: ['user', 'admin'],
         default: 'user'
     },
+    createdAt: {
+        type: Date,
+        required: true,
+        default: Date.now
+    },
 })
 
 UserSchema.pre('save', async function(next) {
