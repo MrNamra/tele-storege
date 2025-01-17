@@ -43,26 +43,61 @@ app.get('/', (req, res) => {
 });
 
 // Route to show all files uploaded with a specific code
-app.get('/u/:code', (req, res) => {
-  const { code } = req.params;
-  
-  // Check if there are any files stored under the provided code
-  const files = fileStorage[code];
-  
-  if (!files || files.length === 0) {
-    return res.status(404).json({ success: false, message: 'No files found for this code.' });
-  }
+app.get('/u/:code', async (req, res) => {
+  const code = req.params.code;
+  try {
+    const messages = await getMessagesFromChat();
+    const matchingFiles = findMatchingFiles(messages, code);
 
-  // Respond with the files
-  res.status(200).json({
-    success: true,
-    files: files.map(file => ({
-      fileName: file.fileName,
-      fileSize: file.fileSize,
-      telegramResponse: file.telegramResponse
-    }))
-  });
+    if (matchingFiles.length > 0) {
+      res.json({ success: true, files: matchingFiles });
+    } else {
+      res.status(404).json({ success: false, message: 'No files found for the provided code' });
+    }
+  } catch (error) {
+    console.error('Error fetching files:', error);
+    res.status(500).send('Internal Server Error');
+  }
 });
+async function getMessagesFromChat() {
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates`;
+
+  try {
+    const response = await axios.get(url);
+    const messages = response.data.result;
+    return messages;
+  } catch (error) {
+    throw new Error('Failed to fetch messages from Telegram');
+  }
+}
+function findMatchingFiles(messages, code) {
+  const matchingFiles = [];
+
+  messages.forEach(message => {
+    // Check if message has text or document and contains the code
+    if (message.message.text && message.message.text.includes(code)) {
+      matchingFiles.push({
+        type: 'text',
+        content: message.message.text,
+        date: message.message.date,
+      });
+    }
+
+    if (message.message.document && message.message.document.file_name) {
+      // Check if document file name contains the code
+      if (message.message.document.file_name.includes(code)) {
+        matchingFiles.push({
+          type: 'file',
+          fileName: message.message.document.file_name,
+          fileId: message.message.document.file_id,
+          date: message.message.date,
+        });
+      }
+    }
+  });
+
+  return matchingFiles;
+}
 
 // Start the server
 app.listen(3000, () => {

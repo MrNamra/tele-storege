@@ -9,11 +9,6 @@ const UserInfoSchema = mongoose.Schema({
         type: String,
         required: true
     },
-    bucketId: {
-        type: String,
-        required: true,
-        unique: true
-    },
     bucketAllowed: {
         type: Number,
         required: true,
@@ -29,6 +24,6 @@ const UserInfoSchema = mongoose.Schema({
         required: true,
         default: Date.now
     },
-})
+});
 
 module.exports = mongoose.model('UserInfo', UserInfoSchema);

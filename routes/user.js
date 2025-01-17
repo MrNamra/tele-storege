@@ -1,14 +1,8 @@
 const express = require('express');
-const UserController = require('../controller/UserController');
-
 const router = express.Router();
+const userController = require('../controller/UserController');
 
-router.get('/dashboard', UserController.dashboard);
-
-router.post('/upload', UserController.upload);
-
-router.get('/download', UserController.download);
-
-router.get('/download/:code', UserController.downloadFile);
+router.post('/register', userController.register);
+router.post('/login', userController.login);
 
 module.exports = router;

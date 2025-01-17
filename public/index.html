@@ -1,49 +1,30 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>File Upload to Telegram</title>
-</head>
-<body>
-  <h1>Upload a file to Telegram Storage</h1>
-  
-  <!-- Form to upload a file and a code -->
-  <form id="upload-form" enctype="multipart/form-data">
-    <input type="text" id="code" name="code" placeholder="Enter code" required>
-    <input type="file" name="file" required>
-    <button type="submit">Upload File</button>
-  </form>
+<form id="uploadForm" enctype="multipart/form-data">
+  <input type="file" name="file" id="file" required />
+  <textarea name="description" placeholder="Description (optional)"></textarea>
+  <button type="submit">Upload</button>
+</form>
 
-  <p id="status"></p>
+<script>
+  const form = document.getElementById("uploadForm");
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
 
-  <script>
-    document.getElementById('upload-form').addEventListener('submit', async function(e) {
-      e.preventDefault();
+    const fileInput = document.getElementById("file");
+    const descriptionInput = form.querySelector("textarea[name=description]");
 
-      const formData = new FormData();
-      const fileInput = document.querySelector('input[type="file"]');
-      const codeInput = document.querySelector('#code');
-      formData.append('file', fileInput.files[0]);
-      formData.append('code', codeInput.value);
+    const formData = new FormData();
+    formData.append("file", fileInput.files[0]);
+    formData.append("description", descriptionInput.value);
 
-      try {
-        const response = await fetch('http://localhost:3000/upload', {
-          method: 'POST',
-          body: formData
-        });
-
-        const result = await response.json();
-        if (result.success) {
-          document.getElementById('status').innerText = 'File uploaded successfully!';
-        } else {
-          document.getElementById('status').innerText = 'Error uploading file.';
-        }
-      } catch (error) {
-        console.error('Error:', error);
-        document.getElementById('status').innerText = 'Error uploading file.';
-      }
-    });
-  </script>
-</body>
-</html>
+    try {
+      const response = await fetch("/upload", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await response.json();
+      alert(data.message || "File uploaded successfully");
+    } catch (error) {
+      alert("Error uploading file");
+    }
+  });
+</script>
