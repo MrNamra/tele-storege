@@ -7,11 +7,7 @@ const FileShareSchema = mongoose.Schema({
     },
     bucketId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'UserInfo'
-    },
-    fileUrl: {
-        type: String,
-        required: true
+        ref: 'Bucket'
     },
     password: {
         type: String,
@@ -19,7 +15,7 @@ const FileShareSchema = mongoose.Schema({
     },
     code: {
         type: String,
-        required: true,
+        required: false,
         unique: true
     },
     createdAt: {

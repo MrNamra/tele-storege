@@ -1,9 +1,12 @@
 const express = require('express');
-const mongoose = require('mongoose');
+const db = require('./config/db');
 const dotenv = require('dotenv');
 const userRoutes = require('./routes/user');
 const bucketRoutes = require('./routes/bucket');
 const fileShareRoutes = require('./routes/fileShare');
+const thumbnailRoutes = require('./routes/thumbnailRoutes');
+const path = require('path');
+var cors = require('cors')
 
 dotenv.config();
 
@@ -11,17 +14,16 @@ const app = express();
 
 // Body parser middleware
 app.use(express.json());
+app.use(cors({ origin: '*' }));
+
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Routes
 app.use('/api/users', userRoutes);
 app.use('/api/buckets', bucketRoutes);
 app.use('/api/files', fileShareRoutes);
-
-// MongoDB Connection
-mongoose
-    .connect(process.env.MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
-    .then(() => console.log('MongoDB connected'))
-    .catch((err) => console.log(err));
+app.use('/api/thumbnail', thumbnailRoutes);
+app.use('/u/', fileShareRoutes);
 
 // Server setup
 const PORT = process.env.PORT || 5000;

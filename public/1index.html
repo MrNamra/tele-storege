@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    <script>
+        fetch('http://127.0.0.1:3000/api/files/access/678b731bd19238e820298ef6', {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ password: 'userProvidedPassword' }),  // Optional if password protection is enabled
+})
+.then(response => response.blob())  // The response will be a Blob (binary data)
+.then(blob => {
+    // Create an object URL for the file and display it (e.g., for an image or document)
+    const url = URL.createObjectURL(blob);
+    
+    // For displaying the file in an <img> or <iframe> tag (for images, PDFs, etc.):
+    const filePreview = document.createElement('img');
+    filePreview.src = url; // For image files
+    document.body.appendChild(filePreview);
+    
+    // Or for PDFs, you can use an <iframe>
+    // const iframe = document.createElement('iframe');
+    // iframe.src = url;
+    // document.body.appendChild(iframe);
+
+    // For forcing download, create a download link:
+    // const downloadLink = document.createElement('a');
+    // downloadLink.href = url;
+    // downloadLink.download = 'filename.ext';  // Optionally specify the filename
+    // downloadLink.click();
+})
+.catch(error => console.error('Error fetching the file:', error));
+    </script>
+</body>
+</html>

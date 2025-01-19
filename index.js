@@ -11,9 +11,9 @@ const UserRoutes = require('./routes/user');
 dotenv.config();
 
 // Telegram bot info
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
-const TELEGRAM_API_URL = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`;
+const TELEGRAM_API_URL = `https://api.telegram.org/bot${BOT_TOKEN}/sendDocument`;
 
 // Initialize Express app
 const app = express();
@@ -60,7 +60,7 @@ app.get('/u/:code', async (req, res) => {
   }
 });
 async function getMessagesFromChat() {
-  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates`;
+  const url = `https://api.telegram.org/bot${BOT_TOKEN}/getUpdates`;
 
   try {
     const response = await axios.get(url);
