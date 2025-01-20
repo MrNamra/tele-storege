@@ -19,12 +19,10 @@ app.use(cors({ origin: '*' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Routes
-app.get('/debug', (req, res) => res.status(200).send('Server is running'));
 app.use('/api/users', userRoutes);
 app.use('/api/buckets', bucketRoutes);
 app.use('/api/files', fileShareRoutes);
 app.use('/api/thumbnail', thumbnailRoutes);
-app.use('/u/', fileShareRoutes);
 
 // Server setup
 const PORT = process.env.PORT || 3000;

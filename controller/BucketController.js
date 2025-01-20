@@ -2,6 +2,7 @@
 const Bucket = require('../models/Bucket');
 const axios = require('axios');
 const FileShare = require('../models/FileShare');
+const User = require('../models/User');
 const File = require('../models/File');
 const { deleteFileFromCloud, getThumbnail } = require('../src/bot');
 
@@ -12,6 +13,16 @@ module.exports = {
         const userId = req.user.id;
 
         try {
+
+            const userData = await User.findById(userId);
+            if (!userData) return res.status(400).json({ status: false, message: "User not found!" });
+
+            if (userData.bucketAllowed < 1) return res.status(400).json({ status: false, message: "You have no bucket allowed!" });
+
+            userData.bucketAllowed = userData.bucketAllowed - 1;
+            userData.bucketCount = userData.bucketCount + 1;
+            await userData.save();
+
             // Creating a new bucket with a unique bucketId
             const newBucket = new Bucket({
                 userId,
@@ -21,9 +32,9 @@ module.exports = {
 
             // Save to database
             await newBucket.save();
-            return res.status(201).json({ message: 'Bucket created successfully', bucket: newBucket });
+            return res.status(201).json({ status: true, message: 'Bucket created successfully', bucket: newBucket });
         } catch (error) {
-            return res.status(500).json({ message: 'Server Error', error: error.message });
+            return res.status(500).json({ status: false, message: 'Server Error', error: error.message });
         }
     },
 
@@ -33,9 +44,27 @@ module.exports = {
 
         try {
             const buckets = await Bucket.find({ userId });
-            return res.status(200).json({ buckets });
+            return res.status(200).json({ status: true, message: "Buckets found", buckets });
         } catch (error) {
-            return res.status(500).json({ message: 'Server Error', error: error.message });
+            return res.status(500).json({ status: false, message: 'Server Error', error: error.message });
+        }
+    },
+
+    // Edit Bucket
+    editBucket: async (req, res) => {
+        const userId = req.user.id;
+        const { bucketId } = req.params;
+        const { bucketName } = req.body;
+
+        try {
+            const bucket = await Bucket.findOne({_id: bucketId, userId: userId});
+            if (!bucket) return res.status(400).json({ status: false, message: "Bucket not found!" });
+
+            bucket.bucketName = bucketName;
+            await bucket.save();
+            return res.status(200).json({ status: true, message: 'Bucket updated successfully', bucket });
+        } catch (error) {
+            return res.status(500).json({ status: false, message: 'Server Error', error: error.message });
         }
     },
 
@@ -50,68 +79,47 @@ module.exports = {
 
             if (!bucket) return res.status(400).json({ message: 'Bucket not found' });
 
-            // delete files data
+            // delete files Share Info data
             await FileShare.deleteMany({ bucketId: bucketId });
 
             // delete files from Cloud Storage
             const allFiles = await File.find({ bucketId: bucketId });
-            console.log("allFiles----------------");
-            console.log(allFiles);
-            return;
-            for (let i = 0; i < allFiles.length; i++) {
-                const deleteResponse = await deleteFileFromCloud(allFiles[i].fileId);
-                if (!deleteResponse.status) return res.status(400).json({ status: false, message: "Failed to delete file from Cloud!" });
+            for(const file of allFiles){
+                await deleteFileFromCloud(file.fileId);
+                await File.deleteOne({ fileId: file.fileId });
             }
 
             // Delete the bucket
             await bucket.deleteOne();
-            return res.status(200).json({ message: 'Bucket deleted successfully' });
+
+            const userData = await User.findById(userId);
+            if (!userData) return res.status(400).json({ status: false, message: "User not found!" });
+
+            userData.bucketCount = userData.bucketCount - 1;
+            userData.bucketAllowed = userData.bucketAllowed + 1;
+            await userData.save();
+
+            return res.status(200).json({ status: true, message: 'Bucket deleted successfully' });
         } catch (error) {
-            return res.status(500).json({ message: 'Server Error', error: error.message });
+            return res.status(500).json({ status: false, message: 'Server Error', error: error.message });
         }
     },
 
     // Show Bucket
     showBucket: async (req, res) => {
         const { code } = req.params;
-        const { password } = req.body;
         try {
             // Find the bucket by its code
             const bucket = await FileShare.findOne({ code: code });
             if (!bucket) return res.status(400).json({ status: false, message: "Data not found!" });
     
             // Fetch all files associated with the bucket (excluding userId)
-            var bucketData = await File.find({ bucketId: bucket.bucketId }, { userId: 0 });
-            var newbucketData = {};
+            var bucketData = await File.find({ bucketId: bucket.bucketId }, { userId: 0, thumbnail: 0, fileUrl: 0 });
 
-            // Prepare promises for fetching thumbnails for image files
-            const promisDAta = bucketData.map(async (file) => {
-                if (file.fileType && file.fileType.startsWith("image")) {
-                    // Fetch thumbnail base64 for image files
-                    const thumbnailBase64 = await getThumbnail(file.fileId);
-                    
-                    // Append the thumbnail to the correct property
-                    newbucketData.thumbnail = thumbnailBase64 || null;
-                } else {
-                    newbucketData.thumbnail = null;
-                }
-    
-                // Return the updated file object
-                return file;
-            });
-
-            const updatedBucketData = await Promise.all(promisDAta);
-
-            // Log the updated data for debugging
-            console.log("updatedBucketData with thumbnails----------------");
-            console.log(updatedBucketData);
-    
             // Send the updated data in the response
-            res.status(200).json({ status: true, message: "Data found", data: updatedBucketData });
+            res.status(200).json({ status: true, message: "Data found", data: bucketData });
         } catch (error) {
-            console.log("------------error-----------");
-            console.log(error);
-            return res.status(500).json({ message: "Server Error", error });
+            return res.status(500).json({ status: false, message: "Server Error", error });
         }
     },
     
@@ -123,21 +131,10 @@ module.exports = {
             const fileData = await File.findOne({ fileId: file_id, bucketId: fileInfo.bucketId });
             if (!fileData) return res.status(400).json({ status: false, message: "File not found!" });
 
-            const response = await axios.get(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/getFile`, {
-                params: { file_id: fileData.fileId },
-            });
-
-            if (response.data.ok) {
-                const filePath = response.data.result.file_path;
-                const fileUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${filePath}`;
-
-                const fileResponse = await axios.get(fileUrl, { responseType: 'stream' });
-                res.setHeader('Content-Type', fileResponse.headers['content-type']);
-                res.setHeader('Content-Disposition', `inline; filename="${fileData.fileName}"`);
-                fileResponse.data.pipe(res);
-            } else {
-                return res.status(400).json({ status: false, message: 'Error fetching file from CloudStorage' });
-            }
+            const fileResponse = await axios.get(fileData.fileUrl, { responseType: 'stream' });
+            res.setHeader('Content-Type', fileResponse.headers['content-type']);
+            res.setHeader('Content-Disposition', `inline; filename="${fileData.fileName}"`);
+            fileResponse.data.pipe(res);
         } catch (error) {
             return res.status(500).json({ status: false, message: 'Server Error', error });
         }

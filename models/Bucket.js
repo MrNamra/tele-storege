@@ -9,7 +9,8 @@ const BucketSchema = mongoose.Schema({
       storage: {
         type: Number,
         required: false,
-        default: 0
+        default: 0,
+        min: 0
       },
       bucketName: {
         type: String,

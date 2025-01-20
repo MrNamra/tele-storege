@@ -29,6 +29,15 @@ const handleFileUpload = async (fileBuffer, bucketId, originalFileName, userId =
     const fileName = message.document.file_name;
     const messageId = message.message_id;
     const fileType = message.document.mime_type;
+    
+    let thumbnailUrl = null;
+    if (message.document.thumbnail) {
+      const thumbnailId = message.document.thumbnail.file_id;
+
+      // Fetch file path from Telegram
+      const fileInfo = await bot.getFile(thumbnailId);
+      thumbnailUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${fileInfo.file_path}`;
+    }
 
     // Get the file link from Telegram
     const fileLink = await bot.getFileLink(fileId);
@@ -40,6 +49,7 @@ const handleFileUpload = async (fileBuffer, bucketId, originalFileName, userId =
       fileUrl: fileLink,
       messageId: messageId,
       fileType: fileType,
+      thumbnail: thumbnailUrl,
       bucketId: bucketId,
       userId: userId,
     });
@@ -64,11 +74,15 @@ const deleteFileFromCloud = async (messageId) => {
   }
 }
 
+const getFile = async (fileId) => {
+  const fileInfo = await bot.getFile(fileId);
+  return fileInfo;
+}
+
+// this function is no need to use
 async function getThumbnail(fileId) {
   try {
     const response = await axios.get(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/getFile?file_id=${fileId}`);
-    console.log("response----------------");
-    console.log(response.data);
 
     if (response.data.ok) {
       const filePath = response.data.result.file_path;
@@ -103,7 +117,6 @@ async function getThumbnail(fileId) {
   }
 }
 
-
 // Respond to /start command
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(msg.chat.id, "Welcome to TGStorage! You can upload files.");
@@ -117,5 +130,6 @@ bot.on("polling_error", (error) => {
 module.exports = {
   handleFileUpload,
   deleteFileFromCloud,
-  getThumbnail
+  getThumbnail,
+  getFile
 };

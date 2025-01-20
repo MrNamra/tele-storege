@@ -19,6 +19,10 @@ const fileSchema = new mongoose.Schema({
     type: String,
     required: false
   },
+  thumbnail: {
+    type: String,
+    required: false
+  },
   fileUrl: {
     type: String,
     required: true

@@ -11,10 +11,11 @@ const upload = multer({ storage: storage }).single('file');
 // upload file route
 router.post('/upload', jwtAuthMiddleware, upload, fileShareController.uploadFile);
 router.post('/:code/upload', upload, fileShareController.uploadFileByCode);
-router.delete('/:code/delete', fileShareController.deleteFileByCode);
+
+// delete upload file route
+router.delete('/:fileId', jwtAuthMiddleware, fileShareController.deleteUploadFile);
 
 // Access shared file route
-router.get('/:code', fileShareController.accessFile);
-router.delete('/end-share/:code', fileShareController.endShare);
+router.get('/:fileId', jwtAuthMiddleware, fileShareController.accessFile);
 
 module.exports = router;

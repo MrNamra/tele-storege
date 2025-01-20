@@ -3,11 +3,13 @@ const mongoose = require('mongoose');
 const FileShareSchema = mongoose.Schema({
     userId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
+        ref: 'User',
+        required: true
     },
     bucketId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'Bucket'
+        ref: 'Bucket',
+        required: true
     },
     password: {
         type: String,

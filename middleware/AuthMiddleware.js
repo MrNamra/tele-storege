@@ -12,6 +12,7 @@ const jwtAuthMiddleware = (req, res, next) => {
         req.user = decoded
         next()
     }catch(err){
+        if(err.message == 'jwt expired') return res.status(401).json({ status:false, session:false, message: "Session expired!"})
         console.log(err)
         res.status(500).json({error: "Invalide Token"})
     }
