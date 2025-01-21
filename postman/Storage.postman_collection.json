@@ -81,6 +81,71 @@
 			"response": []
 		},
 		{
+			"name": "users dashboard",
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "{{token}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{url}}/users/dashboard",
+					"host": [
+						"{{url}}"
+					],
+					"path": [
+						"users",
+						"dashboard"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "users profile update",
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "{{token}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "PUT",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"email\": \"test@test.com\",\r\n    \"name\": \"new Test\",\r\n    \"password\": \"12345678\",\r\n    \"confirmPassword\": \"12345678\"\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{url}}/users/profile",
+					"host": [
+						"{{url}}"
+					],
+					"path": [
+						"users",
+						"profile"
+					]
+				}
+			},
+			"response": []
+		},
+		{
 			"name": "bucket Create",
 			"request": {
 				"auth": {
@@ -381,9 +446,13 @@
 							"type": "text"
 						},
 						{
-							"key": "file",
+							"key": "files",
 							"type": "file",
-							"src": "/C:/Users/Admin/Downloads/WhatsApp Image 2025-01-02 at 3.49.10 PM.jpeg"
+							"src": [
+								"/C:/Users/Admin/Downloads/WhatsApp Image 2025-01-02 at 3.49.10 PM.jpeg",
+								"/C:/Users/Admin/Downloads/WhatsApp Image 2025-01-02 at 3.49.11 PM.jpeg",
+								"/C:/Users/Admin/Downloads/StudentEmail_Application.pdf"
+							]
 						}
 					]
 				},
@@ -446,13 +515,13 @@
 				"method": "GET",
 				"header": [],
 				"url": {
-					"raw": "{{url}}/thumbnail/BQACAgUAAyEGAASJWDTgAAMbZ46OP983LfbyKmVZfhHQAj_Jl0MAAhwUAAK6fHlUYy0wdrgSBhg2BA",
+					"raw": "{{url}}/thumbnail/BQACAgUAAyEGAASMEZsnAAMDZ4_wUgXXaojRXIWVhrVy7OBLBRYAAnEUAAKsq4BU81BKym2vElI2BA",
 					"host": [
 						"{{url}}"
 					],
 					"path": [
 						"thumbnail",
-						"BQACAgUAAyEGAASJWDTgAAMbZ46OP983LfbyKmVZfhHQAj_Jl0MAAhwUAAK6fHlUYy0wdrgSBhg2BA"
+						"BQACAgUAAyEGAASMEZsnAAMDZ4_wUgXXaojRXIWVhrVy7OBLBRYAAnEUAAKsq4BU81BKym2vElI2BA"
 					]
 				}
 			},
@@ -474,13 +543,69 @@
 				"method": "GET",
 				"header": [],
 				"url": {
-					"raw": "{{url}}/files/BQACAgUAAyEGAASJWDTgAAMaZ46NyAhvZnuBdv3gkgx88huCdNsAAhsUAAK6fHlUTnkAAYShA8KNNgQ",
+					"raw": "{{url}}/files/BQACAgUAAyEGAASMEZsnAAMDZ4_wUgXXaojRXIWVhrVy7OBLBRYAAnEUAAKsq4BU81BKym2vElI2BA",
 					"host": [
 						"{{url}}"
 					],
 					"path": [
 						"files",
-						"BQACAgUAAyEGAASJWDTgAAMaZ46NyAhvZnuBdv3gkgx88huCdNsAAhsUAAK6fHlUTnkAAYShA8KNNgQ"
+						"BQACAgUAAyEGAASMEZsnAAMDZ4_wUgXXaojRXIWVhrVy7OBLBRYAAnEUAAKsq4BU81BKym2vElI2BA"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "delete File from bucket",
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "{{token}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "DELETE",
+				"header": [],
+				"url": {
+					"raw": "{{url}}/files/678ff05a0da39f176b93bd5e",
+					"host": [
+						"{{url}}"
+					],
+					"path": [
+						"files",
+						"678ff05a0da39f176b93bd5e"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "user profile",
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "{{token}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{url}}/users/profile",
+					"host": [
+						"{{url}}"
+					],
+					"path": [
+						"users",
+						"profile"
 					]
 				}
 			},

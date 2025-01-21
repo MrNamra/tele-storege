@@ -90,24 +90,44 @@ const endShare = async (req, res) => {
 const uploadFile = async (req, res) => {
     const { bucketId } = req.body;
     const userId = req.user.id;
-    const fileBuffer = req.file.buffer;
-    const originalFileName = req.file.originalname;
-    const fileSizeInBytes = req.file.size;
-    const fileSizeInMB = fileSizeInBytes / (1024 * 1024);
 
-    if (!req.file) return res.status(400).json({ status:false, message: 'File is required.' });
-
+    if (!req.files || req.files.length === 0) {
+        return res.status(400).json({ status: false, message: 'At least one file is required.' });
+    }
+    
     try {
         const bucket = await Bucket.findById(bucketId);
         if(!bucket) return res.status(400).json({ status:false, message: 'Bucket not found.' });
 
-        const uploadResult = await handleFileUpload(fileBuffer, bucketId, originalFileName, userId);
+        let totalAddedSize = 0;
+        let uploadResults = [];
 
-        const newStorage = bucket.storage + fileSizeInMB;
-        bucket.storage = newStorage;
+        // const fileBuffer = req.file.buffer;
+        // const originalFileName = req.file.originalname;
+        // const fileSizeInBytes = req.file.size;
+        // const fileSizeInMB = fileSizeInBytes / (1024 * 1024);
+
+        // if (!req.file) return res.status(400).json({ status:false, message: 'File is required.' });
+
+        // const uploadResult = await handleFileUpload(fileBuffer, bucketId, originalFileName, userId);
+        for (const file of req.files) {
+            const { buffer, originalname, size } = file;
+            const fileSizeInMB = size / (1024 * 1024);
+            totalAddedSize += fileSizeInMB;
+
+            const uploadResult = await handleFileUpload(buffer, bucketId, originalname, userId);
+            uploadResults.push(uploadResult);
+        }
+
+        bucket.storage += totalAddedSize;
         await bucket.save();
 
-        res.status(200).json({ status:true, message: 'File uploaded successfully.', fileId: uploadResult.fileId, thumbnail: uploadResult.thumbnail });
+
+        // const newStorage = bucket.storage + fileSizeInMB;
+        // bucket.storage = newStorage;
+        // await bucket.save();
+
+        res.status(200).json({ status:true, message: 'Files uploaded successfully.', files: uploadResults });
     } catch (error) {
         console.error('Error uploading file:', error);
         res.status(500).json({ status:false, message: 'Internal server error.' });
@@ -117,28 +137,38 @@ const uploadFile = async (req, res) => {
 const uploadFileByCode = async (req, res) => {
     const { code } = req.params;
     const { password } = req.body;
-    const fileBuffer = req.file.buffer;
-    const originalFileName = req.file.originalname;
-    const fileSizeInBytes = req.file.size;
-    const fileSizeInMB = fileSizeInBytes / (1024 * 1024);
+    const { bucketId } = req.body;
+    const userId = req.user.id;
 
-    if (!req.file) return res.status(400).json({ status:false, message: 'File is required.' });
-
+    if (!req.files || req.files.length === 0) {
+        return res.status(400).json({ status: false, message: 'At least one file is required.' });
+    }
+    
     try {
         const fileShare = await FileShare.findOne({ code });
         if(!fileShare) return res.status(400).json({ status:false, message: 'data not found.' });
         if(fileShare.password && fileShare.password !== password) return res.status(400).json({ status:false, message: 'Password is incorrect.' });
 
+
         const bucket = await Bucket.findById(fileShare.bucketId);
         if(!bucket) return res.status(400).json({ status:false, message: 'Bucket not found.' });
 
-        const uploadResult = await handleFileUpload(fileBuffer, fileShare.bucketId, originalFileName);
+        let totalAddedSize = 0;
+        let uploadResults = [];
 
-        const newStorage = bucket.storage + fileSizeInMB;  // Add the file size (in MB) to the current storage
-        bucket.storage = newStorage;
+        for (const file of req.files) {
+            const { buffer, originalname, size } = file;
+            const fileSizeInMB = size / (1024 * 1024);
+            totalAddedSize += fileSizeInMB;
+
+            const uploadResult = await handleFileUpload(buffer, bucketId, originalname, userId);
+            uploadResults.push(uploadResult);
+        }
+
+        bucket.storage += totalAddedSize;
         await bucket.save();
 
-        res.status(200).json({ status:true, message: 'File uploaded successfully.', fileId: uploadResult.fileId });
+        res.status(200).json({ status:true, message: 'Files uploaded successfully.', files: uploadResults });
     } catch (error) {
         console.error('Error uploading file:', error);
         res.status(500).json({ status:false, message: 'Internal server error.' });
@@ -149,7 +179,7 @@ const deleteUploadFile = async (req, res) => {
     try{
         const { fileId } = req.params;
         const userId = req.user.id;
-    
+        
         const fileData = await File.findById(fileId);
         if(!fileData) return res.status(404).json({ status:false, message:"Data not found!" });
 
@@ -160,12 +190,9 @@ const deleteUploadFile = async (req, res) => {
     
         const fileInfo = await getFile(fileData.fileId);
         
-        const fileSize = fileInfo.file_size??0;
+        const fileSize = fileInfo.file_size ? fileInfo.file_size / (1024 * 1024) : 0;
 
-        let newStorage = bucket.storage - fileSize;
-        if(newStorage < 0) newStorage = 0;
-        
-        bucket.storage = newStorage;
+        bucket.storage = Math.max(bucket.storage - fileSize, 0);
         await bucket.save();
     
         await bot.deleteFileFromCloud(fileData.messageId);
