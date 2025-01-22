@@ -98,7 +98,7 @@ const endShare = async (req, res) => {
 
 // Upload file
 const uploadFile = async (req, res) => {
-    const bucketId = sanitizeInput(req.body.bucketId);
+    const { bucketId } = req.body;
     const userId = req.user.id;
 
     if (!req.files || req.files.length === 0) {
@@ -126,6 +126,8 @@ const uploadFile = async (req, res) => {
             totalAddedSize += fileSizeInMB;
 
             const uploadResult = await handleFileUpload(buffer, bucketId, originalname, userId);
+            console.log("---------------uploadResult---------------");
+            console.log(uploadResult);
             uploadResults.push(uploadResult);
         }
 
