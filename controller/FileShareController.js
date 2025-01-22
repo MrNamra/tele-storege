@@ -44,7 +44,7 @@ const shareBucket = async (req, res) => {
         }
 
         await fileShare.save();
-        res.status(200).json({ status: true, message: 'File shared successfully', url: `${process.env.BASE_URL}/share/${fileShare.code}` });
+        res.status(200).json({ status: true, message: 'File shared successfully', code: fileShare.code });
     } catch (error) {
         console.log("------------error-----------");
         console.log(error);
@@ -65,10 +65,15 @@ const accessFile = async (req, res) => {
         if(!bucketData) return res.status(400).json({ status:false, message:"File not found!" });
 
         // Or fetch the file and stream it to the client
-        const fileResponse = await axios.get(fileData.fileUrl, { responseType: 'stream' });
-        res.setHeader('Content-Type', fileResponse.headers['content-type']);
-        res.setHeader('Content-Disposition', `inline; filename="${fileData.fileName}"`);
-        fileResponse.data.pipe(res);
+        // const fileResponse = await axios.get(fileData.fileUrl, { responseType: 'stream' });
+        // res.setHeader('Content-Type', fileResponse.headers['content-type']);
+        // res.setHeader('Content-Disposition', `inline; filename="${fileData.fileName}"`);
+        // fileResponse.data.pipe(res);
+
+        const fileResponse = await axios.get(fileData.fileUrl, { responseType: 'arraybuffer' });
+        const base64Image = Buffer.from(fileResponse.data, 'binary').toString('base64');
+        const contentType = fileResponse.headers['content-type'];
+        return res.send(`data:${contentType};base64,${base64Image}`);
     } catch (error) {
         res.status(500).json({ status: false, message: 'Server Error', error });
     }

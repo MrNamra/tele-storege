@@ -11,8 +11,8 @@ const getThumbNail = async (req, res) => {
         const fileResponse = await axios.get(fileData.thumbnail, { responseType: 'arraybuffer' });
         const base64Image = Buffer.from(fileResponse.data, 'binary').toString('base64');
         const contentType = fileResponse.headers['content-type'];
-
         return res.send(`data:${contentType};base64,${base64Image}`);
+
     } catch (error) {
         console.error("Error fetching thumbnail:", error);
         res.status(500).send("Internal Server Error");

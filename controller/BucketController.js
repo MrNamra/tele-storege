@@ -1,4 +1,3 @@
-// controller/BucketController.js
 const Bucket = require('../models/Bucket');
 const axios = require('axios');
 const FileShare = require('../models/FileShare');
@@ -107,17 +106,34 @@ module.exports = {
 
     // Show Bucket
     showBucket: async (req, res) => {
-        const { code } = req.params;
+        const { code } = req.params || null;
+        const { bucketId } = req.params || null;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const skip = (page - 1) * limit;
         try {
+
+            let bucket = null;
             // Find the bucket by its code
-            const bucket = await FileShare.findOne({ code: code });
+            if(code != null){
+                bucket = await FileShare.findOne({ code: code })
+            } else if(bucketId != null) {
+                bucket = await FileShare.findOne({ code: code })
+            }
             if (!bucket) return res.status(400).json({ status: false, message: "Data not found!" });
     
             // Fetch all files associated with the bucket (excluding userId)
-            var bucketData = await File.find({ bucketId: bucket.bucketId }, { userId: 0, thumbnail: 0, fileUrl: 0 });
+            var bucketData = await File.find({ bucketId: bucket.bucketId }, { userId: 0, thumbnail: 0, fileUrl: 0 }).skip(skip).limit(limit);
+
+            const totalFiles = await File.countDocuments({ bucketId: bucket.bucketId });
 
             // Send the updated data in the response
-            res.status(200).json({ status: true, message: "Data found", data: bucketData });
+            res.status(200).json({ status: true, message: "Data found", data: bucketData, pagination: {
+                    currentPage: page, 
+                    totalPages: Math.ceil(totalFiles / limit),
+                    totalItems: totalFiles
+                }
+            });
         } catch (error) {
             return res.status(500).json({ status: false, message: "Server Error", error });
         }
@@ -131,10 +147,15 @@ module.exports = {
             const fileData = await File.findOne({ fileId: file_id, bucketId: fileInfo.bucketId });
             if (!fileData) return res.status(400).json({ status: false, message: "File not found!" });
 
-            const fileResponse = await axios.get(fileData.fileUrl, { responseType: 'stream' });
-            res.setHeader('Content-Type', fileResponse.headers['content-type']);
-            res.setHeader('Content-Disposition', `inline; filename="${fileData.fileName}"`);
-            fileResponse.data.pipe(res);
+            // const fileResponse = await axios.get(fileData.fileUrl, { responseType: 'stream' });
+            // res.setHeader('Content-Type', fileResponse.headers['content-type']);
+            // res.setHeader('Content-Disposition', `inline; filename="${fileData.fileName}"`);
+            // fileResponse.data.pipe(res);
+
+            const fileResponse = await axios.get(fileData.fileUrl, { responseType: 'arraybuffer' });
+            const base64Image = Buffer.from(fileResponse.data, 'binary').toString('base64');
+            const contentType = fileResponse.headers['content-type'];
+            return res.send(`data:${contentType};base64,${base64Image}`);
         } catch (error) {
             return res.status(500).json({ status: false, message: 'Server Error', error });
         }
