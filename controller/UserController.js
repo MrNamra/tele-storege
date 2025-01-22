@@ -4,14 +4,15 @@ const Bucket = require('../models/Bucket');
 const FileShare = require('../models/FileShare');
 const File = require('../models/File');
 const jwt = require('jsonwebtoken');
+const validator = require('validator');
 
 const register = async (req, res) => {
-    const { rawName, rawEmail, rawPassword } = req.body;
+    let { name, email, password } = req.body;
 
     // sanitize the input
-    const name = rawName ? rawName.replace(/[^a-zA-Z0-9\s]/g, '') : '';
-    const email = rawEmail ? validator.normalizeEmail(rawEmail) : '';
-    const password = rawPassword ? rawPassword.trim() : '';
+    name = name ? name.replace(/[^a-zA-Z0-9\s]/g, '') : '';
+    email = email ? validator.normalizeEmail(email) : '';
+    password = password ? password.trim() : '';
 
     if (email && !validator.isEmail(email)) return res.status(400).json({ status: false, message: 'Invalid email!' });
     if (password && password.length < 8) return res.status(400).json({ status: false, message: 'Password must be at least 8 characters long' });
@@ -31,10 +32,7 @@ const register = async (req, res) => {
 };
 
 const login = async (req, res) => {
-    const { rawEmail, rawPassword } = req.body;
-
-    const email = rawEmail ? validator.normalizeEmail(rawEmail) : '';
-    const password = rawPassword ? rawPassword.trim() : '';
+    const { email, password } = req.body;
 
     if (email && !validator.isEmail(email)) return res.status(400).json({ status: false, message: 'Invalid email!' });
     if (password && password.length < 8) return res.status(400).json({ status: false, message: 'Password must be at least 8 characters long' });
@@ -65,11 +63,11 @@ const profile = async (req, res) => {
 };
 
 const updateProfile = async (req, res) => {
-    const { rawName, rawEmail, rawPassword, rawConfirmPassword } = req.body;
-    const name = rawName ? rawName.replace(/[^a-zA-Z0-9\s]/g, '') : '';
-    const email = rawEmail ? validator.normalizeEmail(rawEmail) : '';
-    const password = rawPassword ? rawPassword.trim() : '';
-    const confirmPassword = rawConfirmPassword ? rawConfirmPassword.trim() : '';
+    let { name, email, password, confirmPassword } = req.body;
+    name = name ? name.replace(/[^a-zA-Z0-9\s]/g, '') : '';
+    email = email ? validator.normalizeEmail(email) : '';
+    password = password ? password.trim() : '';
+    confirmPassword = confirmPassword ? confirmPassword.trim() : '';
 
     if (email && !validator.isEmail(email)) return res.status(400).json({ status: false, message: 'Invalid email!' });
     if (password && password.length < 8) return res.status(400).json({ status: false, message: 'Password must be at least 8 characters long' });

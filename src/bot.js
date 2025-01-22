@@ -36,6 +36,8 @@ const handleFileUpload = async (fileBuffer, bucketId, originalFileName, userId =
 
       // Fetch file path from Telegram
       const fileInfo = await bot.getFile(thumbnailId);
+      console.log("fileInfo----------------");
+      console.log(fileInfo);
       thumbnailUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${fileInfo.file_path}`;
     }
 

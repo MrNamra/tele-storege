@@ -8,8 +8,7 @@ const { deleteFileFromCloud, getThumbnail } = require('../src/bot');
 module.exports = {
     // Create Bucket
     createBucket: async (req, res) => {
-        const { rawBucketName } = req.body;
-        const bucketName = rawBucketName ? rawBucketName.replace(/[^a-zA-Z0-9\s]/g, '') : '';
+        const { bucketName } = req.body;
         const userId = req.user.id;
 
         try {
@@ -54,8 +53,7 @@ module.exports = {
     editBucket: async (req, res) => {
         const userId = req.user.id;
         const bucketId = sanitizeInput(req.params.bucketId);
-        const { rawBucketName } = req.body;
-        const bucketName = rawBucketName ? rawBucketName.replace(/[^a-zA-Z0-9\s]/g, '') : '';
+        const { bucketName } = req.body;
 
         try {
             const bucket = await Bucket.findOne({_id: bucketId, userId: userId});
@@ -71,7 +69,7 @@ module.exports = {
 
     // Delete Bucket
     deleteBucket: async (req, res) => {
-        const bucketId = sanitizeInput(req.params.bucketId);
+        const { bucketId } = req.params;
         const userId = req.user.id;
 
         try {
@@ -108,8 +106,7 @@ module.exports = {
 
     // Show Bucket
     showBucket: async (req, res) => {
-        const code = sanitizeInput(req.params.code) || null;
-        const bucketId = sanitizeInput(req.params.bucketId) || null;
+        const { code, bucketId } = req.params;
         const page = parseInt(req.query.page) || 1;
         if (isNaN(page) || page <= 0) page = 1;
         const limit = parseInt(req.query.limit) || 20;
@@ -145,8 +142,7 @@ module.exports = {
     
     showBucketFile: async (req, res) => {
         try {
-            const code = sanitizeInput(req.params.code);
-            const file_id = sanitizeInput(req.params.file_id);
+            const { code, file_id } = req.params;
             const fileInfo = await FileShare.findOne({ code: code });
             const fileData = await File.findOne({ fileId: file_id, bucketId: fileInfo.bucketId });
             if (!fileData) return res.status(400).json({ status: false, message: "File not found!" });

@@ -1,5 +1,6 @@
 const https = require('https');
 const File = require('../models/File');
+const { sanitizeFileId } = require('../utils/sanitizers');
 
 const getThumbNail = async (req, res) => {
     try {
