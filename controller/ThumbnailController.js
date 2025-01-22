@@ -7,7 +7,7 @@ const getThumbNail = async (req, res) => {
         const fileId = sanitizeFileId(req.params.fileId);
 
         const fileData = await File.findOne({ fileId: fileId });
-        if (!fileData) return res.status(400).json({ status: false, message: "File not found!" });
+        if (!fileData.thumbnail) return res.status(400).json({ status: false, message: "Thumbnail not found!" });
 
         const fileUrl = fileData.thumbnail;
         https.get(fileUrl, (fileRes) => {
@@ -30,7 +30,7 @@ const getFile = async (req, res) => {
     const fileId = sanitizeFileId(req.params.fileId);
 
     const fileData = await File.findOne({ fileId: fileId });
-    if (!fileData) return res.status(400).json({ status: false, message: "File not found!" });
+    if (!fileData.fileUrl) return res.status(400).json({ status: false, message: "File not found!" });
 
     const fileUrl = fileData.fileUrl;
     https.get(fileUrl, (fileRes) => {
