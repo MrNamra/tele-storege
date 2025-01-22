@@ -1,7 +1,7 @@
 const FileShare = require('../models/FileShare');
 const File = require('../models/File');
 const Bucket = require('../models/Bucket');
-const axios = require('axios')
+const https = require('https');
 const bot = require('../src/bot');
 const mongoose = require('mongoose');
 const { handleFileUpload, getFile } = require('../src/bot');
@@ -54,7 +54,7 @@ const shareBucket = async (req, res) => {
 
 // Access file
 const accessFile = async (req, res) => {
-    const { fileId } = req.params;
+    const fileId = sanitizeFileId(req.params.fileId);
     const userId = req.user.id;
 
     try {
@@ -70,10 +70,15 @@ const accessFile = async (req, res) => {
         // res.setHeader('Content-Disposition', `inline; filename="${fileData.fileName}"`);
         // fileResponse.data.pipe(res);
 
-        const fileResponse = await axios.get(fileData.fileUrl, { responseType: 'arraybuffer' });
-        const base64Image = Buffer.from(fileResponse.data, 'binary').toString('base64');
-        const contentType = fileResponse.headers['content-type'];
-        return res.send(`data:${contentType};base64,${base64Image}`);
+        https.get(fileData.fileUrl, (fileRes) => {
+            const contentType = fileRes.headers['content-type'];
+
+            res.setHeader('Content-Type', contentType);
+            res.setHeader('Content-Disposition', 'inline');
+            fileRes.pipe(res);
+        }).on('error', (err) => {
+            res.status(500).send('Error streaming file');
+        });
     } catch (error) {
         res.status(500).json({ status: false, message: 'Server Error', error });
     }
@@ -82,7 +87,7 @@ const accessFile = async (req, res) => {
 // End share
 const endShare = async (req, res) => {
     const userId = req.user.id; 
-    const { code } = req.params;
+    const code = sanitizeInput(req.params.code);
     const fileShare = await FileShare.findOne({ code });
     if(!fileShare) return res.status(400).json({ status:false, message:"Data not found!" });
     console.log(fileShare, userId);
@@ -93,7 +98,7 @@ const endShare = async (req, res) => {
 
 // Upload file
 const uploadFile = async (req, res) => {
-    const { bucketId } = req.body;
+    const bucketId = sanitizeInput(req.body.bucketId);
     const userId = req.user.id;
 
     if (!req.files || req.files.length === 0) {
@@ -140,9 +145,9 @@ const uploadFile = async (req, res) => {
 };
 
 const uploadFileByCode = async (req, res) => {
-    const { code } = req.params;
-    const { password } = req.body;
-    const { bucketId } = req.body;
+    const code = sanitizeInput(req.params.code);
+    const password = sanitizeInput(req.body.password);
+    const bucketId = sanitizeInput(req.body.bucketId);
     const userId = req.user.id;
 
     if (!req.files || req.files.length === 0) {

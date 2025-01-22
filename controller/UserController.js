@@ -6,7 +6,15 @@ const File = require('../models/File');
 const jwt = require('jsonwebtoken');
 
 const register = async (req, res) => {
-    const { name, email, password } = req.body;
+    const { rawName, rawEmail, rawPassword } = req.body;
+
+    // sanitize the input
+    const name = rawName ? rawName.replace(/[^a-zA-Z0-9\s]/g, '') : '';
+    const email = rawEmail ? validator.normalizeEmail(rawEmail) : '';
+    const password = rawPassword ? rawPassword.trim() : '';
+
+    if (email && !validator.isEmail(email)) return res.status(400).json({ status: false, message: 'Invalid email!' });
+    if (password && password.length < 8) return res.status(400).json({ status: false, message: 'Password must be at least 8 characters long' });
 
     try {
         const existingUser = await User.findOne({ email });
@@ -23,7 +31,13 @@ const register = async (req, res) => {
 };
 
 const login = async (req, res) => {
-    const { email, password } = req.body;
+    const { rawEmail, rawPassword } = req.body;
+
+    const email = rawEmail ? validator.normalizeEmail(rawEmail) : '';
+    const password = rawPassword ? rawPassword.trim() : '';
+
+    if (email && !validator.isEmail(email)) return res.status(400).json({ status: false, message: 'Invalid email!' });
+    if (password && password.length < 8) return res.status(400).json({ status: false, message: 'Password must be at least 8 characters long' });
 
     try {
         const user = await User.findOne({ email });
@@ -51,7 +65,14 @@ const profile = async (req, res) => {
 };
 
 const updateProfile = async (req, res) => {
-    const { name, email, password, confirmPassword } = req.body;
+    const { rawName, rawEmail, rawPassword, rawConfirmPassword } = req.body;
+    const name = rawName ? rawName.replace(/[^a-zA-Z0-9\s]/g, '') : '';
+    const email = rawEmail ? validator.normalizeEmail(rawEmail) : '';
+    const password = rawPassword ? rawPassword.trim() : '';
+    const confirmPassword = rawConfirmPassword ? rawConfirmPassword.trim() : '';
+
+    if (email && !validator.isEmail(email)) return res.status(400).json({ status: false, message: 'Invalid email!' });
+    if (password && password.length < 8) return res.status(400).json({ status: false, message: 'Password must be at least 8 characters long' });
     if (password !== confirmPassword) return res.status(400).json({ status: false, message: 'Password and confirm password do not match' });
 
     const userId = req.user.id;
@@ -92,9 +113,6 @@ const dashboard = async (req, res) => {
         totalStorage: totalStorage,
         totalFiles: totalFiles,
     }
-    // const files = await File.find({ userId: userId });
-
-    console.log(userId);
     res.status(200).json({ status: true, message: 'Dashboard fetched successfully', data });
 };
 

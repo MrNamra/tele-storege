@@ -1,17 +1,23 @@
-const axios = require('axios');
+const https = require('https');
 const File = require('../models/File');
 
 const getThumbNail = async (req, res) => {
     try {
-        const fileId = req.params.fileId;
+        const fileId = sanitizeFileId(req.params.fileId);
 
-        // Step 1: Get the file path from Telegram
         const fileData = await File.findOne({ fileId: fileId });
         if (!fileData) return res.status(400).json({ status: false, message: "File not found!" });
-        const fileResponse = await axios.get(fileData.thumbnail, { responseType: 'arraybuffer' });
-        const base64Image = Buffer.from(fileResponse.data, 'binary').toString('base64');
-        const contentType = fileResponse.headers['content-type'];
-        return res.send(`data:${contentType};base64,${base64Image}`);
+
+        const fileUrl = fileData.thumbnail;
+        https.get(fileUrl, (fileRes) => {
+            const contentType = fileRes.headers['content-type'];
+
+            res.setHeader('Content-Type', contentType);
+            res.setHeader('Content-Disposition', 'inline');
+            fileRes.pipe(res);
+        }).on('error', (err) => {
+            res.status(500).send('Error streaming file');
+        });
 
     } catch (error) {
         console.error("Error fetching thumbnail:", error);
@@ -19,4 +25,22 @@ const getThumbNail = async (req, res) => {
     }
 };
 
-module.exports = { getThumbNail };
+const getFile = async (req, res) => {
+    const fileId = sanitizeFileId(req.params.fileId);
+
+    const fileData = await File.findOne({ fileId: fileId });
+    if (!fileData) return res.status(400).json({ status: false, message: "File not found!" });
+
+    const fileUrl = fileData.fileUrl;
+    https.get(fileUrl, (fileRes) => {
+        const contentType = fileRes.headers['content-type'];
+
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Disposition', 'inline');
+        fileRes.pipe(res);
+    }).on('error', (err) => {
+        res.status(500).send('Error streaming file');
+    });
+};
+
+module.exports = { getThumbNail, getFile };

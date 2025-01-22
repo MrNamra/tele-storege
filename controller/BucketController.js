@@ -1,5 +1,5 @@
 const Bucket = require('../models/Bucket');
-const axios = require('axios');
+const https = require('https');
 const FileShare = require('../models/FileShare');
 const User = require('../models/User');
 const File = require('../models/File');
@@ -8,7 +8,8 @@ const { deleteFileFromCloud, getThumbnail } = require('../src/bot');
 module.exports = {
     // Create Bucket
     createBucket: async (req, res) => {
-        const { bucketName } = req.body;
+        const { rawBucketName } = req.body;
+        const bucketName = rawBucketName ? rawBucketName.replace(/[^a-zA-Z0-9\s]/g, '') : '';
         const userId = req.user.id;
 
         try {
@@ -52,8 +53,9 @@ module.exports = {
     // Edit Bucket
     editBucket: async (req, res) => {
         const userId = req.user.id;
-        const { bucketId } = req.params;
-        const { bucketName } = req.body;
+        const bucketId = sanitizeInput(req.params.bucketId);
+        const { rawBucketName } = req.body;
+        const bucketName = rawBucketName ? rawBucketName.replace(/[^a-zA-Z0-9\s]/g, '') : '';
 
         try {
             const bucket = await Bucket.findOne({_id: bucketId, userId: userId});
@@ -69,7 +71,7 @@ module.exports = {
 
     // Delete Bucket
     deleteBucket: async (req, res) => {
-        const { bucketId } = req.params;
+        const bucketId = sanitizeInput(req.params.bucketId);
         const userId = req.user.id;
 
         try {
@@ -106,10 +108,12 @@ module.exports = {
 
     // Show Bucket
     showBucket: async (req, res) => {
-        const { code } = req.params || null;
-        const { bucketId } = req.params || null;
+        const code = sanitizeInput(req.params.code) || null;
+        const bucketId = sanitizeInput(req.params.bucketId) || null;
         const page = parseInt(req.query.page) || 1;
+        if (isNaN(page) || page <= 0) page = 1;
         const limit = parseInt(req.query.limit) || 20;
+        if (isNaN(limit) || limit <= 0) limit = 20;
         const skip = (page - 1) * limit;
         try {
 
@@ -118,7 +122,7 @@ module.exports = {
             if(code != null){
                 bucket = await FileShare.findOne({ code: code })
             } else if(bucketId != null) {
-                bucket = await FileShare.findOne({ code: code })
+                bucket = await Bucket.findOne({ _id: bucketId })
             }
             if (!bucket) return res.status(400).json({ status: false, message: "Data not found!" });
     
@@ -141,8 +145,8 @@ module.exports = {
     
     showBucketFile: async (req, res) => {
         try {
-            const { code } = req.params;
-            const { file_id } = req.params;
+            const code = sanitizeInput(req.params.code);
+            const file_id = sanitizeInput(req.params.file_id);
             const fileInfo = await FileShare.findOne({ code: code });
             const fileData = await File.findOne({ fileId: file_id, bucketId: fileInfo.bucketId });
             if (!fileData) return res.status(400).json({ status: false, message: "File not found!" });
@@ -152,10 +156,20 @@ module.exports = {
             // res.setHeader('Content-Disposition', `inline; filename="${fileData.fileName}"`);
             // fileResponse.data.pipe(res);
 
-            const fileResponse = await axios.get(fileData.fileUrl, { responseType: 'arraybuffer' });
-            const base64Image = Buffer.from(fileResponse.data, 'binary').toString('base64');
-            const contentType = fileResponse.headers['content-type'];
-            return res.send(`data:${contentType};base64,${base64Image}`);
+            // const fileResponse = await axios.get(fileData.fileUrl, { responseType: 'arraybuffer' });
+            // const base64Image = Buffer.from(fileResponse.data, 'binary').toString('base64');
+            // const contentType = fileResponse.headers['content-type'];
+            // return res.send(`data:${contentType};base64,${base64Image}`);
+
+            https.get(fileData.fileUrl, (fileRes) => {
+                const contentType = fileRes.headers['content-type'];
+    
+                res.setHeader('Content-Type', contentType);
+                res.setHeader('Content-Disposition', 'inline');
+                fileRes.pipe(res);
+            }).on('error', (err) => {
+                res.status(500).send('Error streaming file');
+            });
         } catch (error) {
             return res.status(500).json({ status: false, message: 'Server Error', error });
         }

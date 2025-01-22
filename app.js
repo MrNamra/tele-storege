@@ -6,7 +6,9 @@ const bucketRoutes = require('./routes/bucket');
 const fileShareRoutes = require('./routes/fileShare');
 const thumbnailRoutes = require('./routes/thumbnailRoutes');
 const path = require('path');
-var cors = require('cors')
+const cors = require('cors')
+
+const https = require('https');
 
 dotenv.config();
 
@@ -22,7 +24,23 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api/users', userRoutes);
 app.use('/api/buckets', bucketRoutes);
 app.use('/api/files', fileShareRoutes);
-app.use('/api/thumbnail', thumbnailRoutes);
+app.use('/api', thumbnailRoutes);
+
+// proxy routes
+app.get('/file/:fileName', (req, res) => {
+    const fileName = req.params.fileName;
+    const fileUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/documents/${fileName}`;
+
+    https.get(fileUrl, (fileRes) => {
+        const contentType = fileRes.headers['content-type'];
+
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Disposition', 'inline');
+        fileRes.pipe(res);
+    }).on('error', (err) => {
+        res.status(500).send('Error streaming file');
+    });
+});
 
 // Server setup
 const PORT = process.env.PORT || 3000;
