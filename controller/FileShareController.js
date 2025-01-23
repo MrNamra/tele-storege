@@ -4,6 +4,7 @@ const Bucket = require('../models/Bucket');
 const https = require('https');
 const bot = require('../src/bot');
 const mongoose = require('mongoose');
+const { handleFileUpload, deleteFileFromCloud } = require("../src/bot");
 
 // Share File
 const shareBucket = async (req, res) => {
