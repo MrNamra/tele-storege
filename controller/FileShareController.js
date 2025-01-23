@@ -4,7 +4,6 @@ const Bucket = require('../models/Bucket');
 const https = require('https');
 const bot = require('../src/bot');
 const mongoose = require('mongoose');
-const { handleFileUpload, getFile } = require('../src/bot');
 
 // Share File
 const shareBucket = async (req, res) => {
@@ -54,7 +53,7 @@ const shareBucket = async (req, res) => {
 
 // Access file
 const accessFile = async (req, res) => {
-    const fileId = sanitizeFileId(req.params.fileId);
+    const fileId = req.params.fileId;
     const userId = req.user.id;
 
     try {
