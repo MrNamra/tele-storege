@@ -170,7 +170,7 @@ const uploadFileByCode = async (req, res) => {
             const fileSizeInMB = size / (1024 * 1024);
             totalAddedSize += fileSizeInMB;
 
-            const uploadResult = await handleFileUpload(buffer, fileShare.bucketId, originalname, userId);
+            const uploadResult = await handleFileUpload(buffer, fileShare.bucketId, originalname);
             uploadResults.push(uploadResult);
         }
 

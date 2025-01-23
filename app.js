@@ -5,7 +5,6 @@ const userRoutes = require('./routes/user');
 const bucketRoutes = require('./routes/bucket');
 const fileShareRoutes = require('./routes/fileShare');
 const thumbnailRoutes = require('./routes/thumbnailRoutes');
-const path = require('path');
 const cors = require('cors')
 
 const https = require('https');
@@ -18,7 +17,7 @@ const app = express();
 app.use(express.json());
 app.use(cors({ origin: '*' }));
 
-app.use(express.static(path.join(__dirname, 'public')));
+// app.use(express.static(path.join(__dirname, 'public')));
 
 // Routes
 app.use('/api/users', userRoutes);
