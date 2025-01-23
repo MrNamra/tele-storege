@@ -123,7 +123,8 @@ module.exports = {
                 const tmpBucketData = await Bucket.findById(bucket.bucketId);
                 totalStorage = tmpBucketData.storage;
             } else if(bucketId != null) {
-                bucket = await Bucket.findOne({ _id: bucketId })
+                const userId = req.user.id;
+                bucket = await Bucket.findOne({ _id: bucketId, userId: userId })
                 totalStorage = bucket.storage;
             }
             if (!bucket) return res.status(400).json({ status: false, message: "Data not found!" });

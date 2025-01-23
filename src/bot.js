@@ -19,37 +19,64 @@ const handleFileUpload = async (fileBuffer, bucketId, originalFileName, userId =
 
     // Send the document to Telegram chat
     const message = await bot.sendDocument(process.env.CHAT_ID, tempFilePath, {
-      caption: `${bucketId}`, // Attach bucketId as caption
-    });
+      filename: originalFileName,
+      content: fs.createReadStream(tempFilePath),
+    }, { caption: `${bucketId}` });
 
     fs.unlinkSync(tempFilePath);
 
-    // Extract file details
-    const fileId = message.document.file_id;
-    const fileName = message.document.file_name;
-    const messageId = message.message_id;
-    const fileType = message.document.mime_type;
-    
-    let thumbnailUrl = null;
-    if (message.document.thumbnail) {
-      const thumbnailId = message.document.thumbnail.file_id;
+    console.log("Telegram API Response:", message);
 
-      // Fetch file path from Telegram
-      const fileInfo = await bot.getFile(thumbnailId);
-      console.log("fileInfo----------------");
-      console.log(fileInfo);
-      thumbnailUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${fileInfo.file_path}`;
+    // Extract file details
+    let fileId, fileName, fileType, fileUrl, thumbnailUrl = null;
+    if (message.document) {
+      fileId = message.document.file_id;
+      fileName = message.document.file_name || originalFileName;
+      fileType = message.document.mime_type;
+    } else if (message.photo) {
+      fileId = message.photo[message.photo.length - 1].file_id; // Get highest resolution image
+      fileName = originalFileName;
+      fileType = "image/jpeg"; // Telegram returns photos as JPEG
+    } else if (message.video) {
+      fileId = message.video.file_id;
+      fileName = message.video.file_name || originalFileName;
+      fileType = message.video.mime_type;
+    } else if (message.audio) {
+      fileId = message.audio.file_id;
+      fileName = message.audio.file_name || originalFileName;
+      fileType = message.audio.mime_type;
+    } else {
+      console.error("Telegram API did not return a recognized file type:", message);
+      throw new Error("Unsupported file type returned by Cloud.");
+    }
+    
+    fileUrl = await bot.getFileLink(fileId);
+
+    let thumbnailId = null;
+    if (message.document?.thumbnail) {
+      thumbnailId = message.document.thumbnail.file_id;
+    } else if (message.photo) {
+      thumbnailId = message.photo[0].file_id; // Use first photo in array
+    } else if (message.video?.thumbnail) {
+      thumbnailId = message.video.thumbnail.file_id;
     }
 
-    // Get the file link from Telegram
-    const fileLink = await bot.getFileLink(fileId);
+    if (thumbnailId) {
+      try {
+        const fileInfo = await bot.getFile(thumbnailId);
+        console.log("Thumbnail Info:", fileInfo);
+        thumbnailUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${fileInfo.file_path}`;
+      } catch (thumbnailError) {
+        console.error("Error fetching thumbnail:", thumbnailError);
+      }
+    }
 
     // Save the file metadata to the database (not the actual file)
     const newFile = new File({
       fileId: fileId,
       fileName: originalFileName,
-      fileUrl: fileLink,
-      messageId: messageId,
+      fileUrl: fileUrl,
+      messageId: message.message_id,
       fileType: fileType,
       thumbnail: thumbnailUrl,
       bucketId: bucketId,
@@ -58,7 +85,7 @@ const handleFileUpload = async (fileBuffer, bucketId, originalFileName, userId =
 
     await newFile.save();
 
-    return { success: true, fileId, fileName, fileType, fileUrl: fileLink, bucketId, userId };
+    return { success: true, fileId, fileName, fileType, fileUrl: fileUrl, bucketId, userId };
   } catch (error) {
     console.error("Error uploading file to Telegram:", error);
     throw error;
