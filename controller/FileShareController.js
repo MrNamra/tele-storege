@@ -148,7 +148,6 @@ const uploadFile = async (req, res) => {
 
 const uploadFileByCode = async (req, res) => {
     const { code, password, bucketId } = req.body;
-    const userId = req.user.id;
 
     if (!req.files || req.files.length === 0) {
         return res.status(400).json({ status: false, message: 'At least one file is required.' });
@@ -205,7 +204,7 @@ const deleteUploadFile = async (req, res) => {
         bucket.storage = Math.max(bucket.storage - fileSize, 0);
         await bucket.save();
     
-        await bot.deleteFileFromCloud(fileData.messageId);
+        await deleteFileFromCloud(fileData.messageId);
     
         await File.deleteOne({ _id: fileId });
         return res.status(200).json({ status:true, message:"File deleted successfully!" });
