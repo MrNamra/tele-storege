@@ -5,8 +5,14 @@ const fileShareController = require('../controller/FileShareController');
 const { jwtAuthMiddleware } = require('../middleware/AuthMiddleware');
 
 // Set up multer to handle file uploads (in memory storage)
-const storage = multer.memoryStorage();
-const upload = multer({ storage: storage, limits: { fileSize: 50 * 1024 * 1024 } }).array('files', 50);
+let storage, upload;
+try {
+    storage = multer.memoryStorage();
+    upload = multer({ storage: storage, limits: { fileSize: 50 * 1024 * 1024 } }).array('files[]', 50);
+} catch (error) {
+    console.log(error);
+    return res.status(500).json({ status: false, message: 'Internal server error!' });
+}
 
 // upload file route
 router.post('/upload', jwtAuthMiddleware, upload, fileShareController.uploadFile);
