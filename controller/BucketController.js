@@ -116,11 +116,15 @@ module.exports = {
         try {
 
             let bucket = null;
+            let totalStorage = 0;
             // Find the bucket by its code
             if(code != null){
                 bucket = await FileShare.findOne({ code: code })
+                const tmpBucketData = await Bucket.findById(bucket.bucketId);
+                totalStorage = tmpBucketData.storage;
             } else if(bucketId != null) {
                 bucket = await Bucket.findOne({ _id: bucketId })
+                totalStorage = bucket.storage;
             }
             if (!bucket) return res.status(400).json({ status: false, message: "Data not found!" });
     
@@ -128,10 +132,6 @@ module.exports = {
             var bucketData = await File.find({ bucketId: bucket.bucketId }, { userId: 0, thumbnail: 0, fileUrl: 0 }).skip(skip).limit(limit);
 
             const totalFiles = await File.countDocuments({ bucketId: bucket.bucketId });
-            const totalStorage = await File.aggregate([
-                { $match: { bucketId: bucket.bucketId } },
-                { $group: { _id: null, totalSize: { $sum: "$fileSize" } } }
-            ]);
 
             // Send the updated data in the response
             res.status(200).json({ status: true, message: "Data found", data: bucketData, totalFiles, totalStorage, pagination: {
