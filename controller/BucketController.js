@@ -106,7 +106,8 @@ module.exports = {
 
     // Show Bucket
     showBucket: async (req, res) => {
-        const { code, bucketId } = req.params;
+        const code = req.params.code;
+        const bucketId = req.params.bucketId;
         const page = parseInt(req.query.page) || 1;
         if (isNaN(page) || page <= 0) page = 1;
         const limit = parseInt(req.query.limit) || 20;
@@ -127,9 +128,13 @@ module.exports = {
             var bucketData = await File.find({ bucketId: bucket.bucketId }, { userId: 0, thumbnail: 0, fileUrl: 0 }).skip(skip).limit(limit);
 
             const totalFiles = await File.countDocuments({ bucketId: bucket.bucketId });
+            const totalStorage = await File.aggregate([
+                { $match: { bucketId: bucket.bucketId } },
+                { $group: { _id: null, totalSize: { $sum: "$fileSize" } } }
+            ]);
 
             // Send the updated data in the response
-            res.status(200).json({ status: true, message: "Data found", data: bucketData, pagination: {
+            res.status(200).json({ status: true, message: "Data found", data: bucketData, totalFiles, totalStorage, pagination: {
                     currentPage: page, 
                     totalPages: Math.ceil(totalFiles / limit),
                     totalItems: totalFiles
