@@ -147,14 +147,14 @@ const uploadFile = async (req, res) => {
 };
 
 const uploadFileByCode = async (req, res) => {
-    const { code, password, bucketId } = req.body;
-
+    const { password } = req.body;
+    const code = req.params.code;
     if (!req.files || req.files.length === 0) {
         return res.status(400).json({ status: false, message: 'At least one file is required.' });
     }
     
     try {
-        const fileShare = await FileShare.findOne({ code });
+        const fileShare = await FileShare.findOne({ code :code });
         if(!fileShare) return res.status(400).json({ status:false, message: 'data not found.' });
         if(fileShare.password && fileShare.password !== password) return res.status(400).json({ status:false, message: 'Password is incorrect.' });
 
