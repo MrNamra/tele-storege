@@ -86,7 +86,7 @@ const accessFile = async (req, res) => {
 // End share
 const endShare = async (req, res) => {
     const userId = req.user.id; 
-    const code = sanitizeInput(req.params.code);
+    const { code } = req.params;
     const fileShare = await FileShare.findOne({ code });
     if(!fileShare) return res.status(400).json({ status:false, message:"Data not found!" });
     console.log(fileShare, userId);
@@ -146,9 +146,7 @@ const uploadFile = async (req, res) => {
 };
 
 const uploadFileByCode = async (req, res) => {
-    const code = sanitizeInput(req.params.code);
-    const password = sanitizeInput(req.body.password);
-    const bucketId = sanitizeInput(req.body.bucketId);
+    const { code, password, bucketId } = req.body;
     const userId = req.user.id;
 
     if (!req.files || req.files.length === 0) {
