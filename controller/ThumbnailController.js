@@ -27,7 +27,8 @@ const getThumbNail = async (req, res) => {
 };
 
 const getFile = async (req, res) => {
-    const fileId = sanitizeFileId(req.params.fileId);
+    const rawFileId = sanitizeFileId(req.params.fileId);
+    const fileId = rawFileId.split('.')[0];
 
     const fileData = await File.findOne({ fileId: fileId });
     if (!fileData) return res.status(404).json({ status: false, message: "File not found!" });
