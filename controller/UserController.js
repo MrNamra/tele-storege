@@ -88,7 +88,7 @@ const dashboard = async (req, res) => {
     const userId = req.user.id;
     const user = await User.findOne({ _id: userId }, { _id: 0, password: 0, __v: 0, role: 0, createdAt: 0 });
     const buckets = await Bucket.find({ userId: userId },{ userId: 0 , __v: 0});
-    const totalBuckets = await Bucket.estimatedDocumentCount({ userId: userId });
+    const totalBuckets = await Bucket.count({ userId: userId });
     const totalStorage = buckets.reduce((sum, bucket) => sum + (bucket.storage || 0), 0);
 
     const newBuckets = await Promise.all(
@@ -102,7 +102,7 @@ const dashboard = async (req, res) => {
     );
 
     const recentFiles = await File.find({ userId: userId },{ _id: 0, fileUrl: 0, userId: 0, uploadedAt:0, __v: 0, thumbnail: 0}).sort({ createdAt: -1 }).limit(5);
-    const totalFiles = await File.estimatedDocumentCount({ userId: userId });
+    const totalFiles = await File.count({ userId: userId });
     let data = {
         user: user,
         bucket: newBuckets,
