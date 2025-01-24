@@ -191,12 +191,12 @@ const deleteUploadFile = async (req, res) => {
         
         const fileData = await File.findById(fileId);
         if(!fileData) return res.status(404).json({ status:false, message:"Data not found!" });
-
-        if(!fileData.userId.equals(userId)) return res.status(400).json({ status:false, message:"Something went wrong!" });
-    
+        
         const bucket = await Bucket.findById(fileData.bucketId);
         if(!bucket) return res.status(404).json({ status:false, message:"Bucket not found!" });
-    
+        
+        if(!bucket.userId.equals(userId)) return res.status(400).json({ status:false, message:"Something went wrong!" });
+
         const fileInfo = await getFile(fileData.fileId);
         
         const fileSize = fileInfo.file_size ? fileInfo.file_size / (1024 * 1024) : 0;
