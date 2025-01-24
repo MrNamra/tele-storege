@@ -52,7 +52,7 @@ module.exports = {
     // Edit Bucket
     editBucket: async (req, res) => {
         const userId = req.user.id;
-        const bucketId = sanitizeInput(req.params.bucketId);
+        const bucketId = req.params.bucketId;
         const { bucketName } = req.body;
 
         try {
@@ -108,6 +108,7 @@ module.exports = {
     showBucket: async (req, res) => {
         const code = req.params.code;
         const bucketId = req.params.bucketId;
+        const search = req.query.search || '';
         const page = parseInt(req.query.page) || 1;
         if (isNaN(page) || page <= 0) page = 1;
         const limit = parseInt(req.query.limit) || 20;
@@ -125,14 +126,19 @@ module.exports = {
             } else if(bucketId != null) {
                 const userId = req.user.id;
                 bucket = await Bucket.findOne({ _id: bucketId, userId: userId })
+                bucket.bucketId = bucket._id;
                 totalStorage = bucket.storage;
             }
             if (!bucket) return res.status(400).json({ status: false, message: "Data not found!" });
     
             // Fetch all files associated with the bucket (excluding userId)
-            var bucketData = await File.find({ bucketId: bucket.bucketId }, { userId: 0, thumbnail: 0, fileUrl: 0 }).skip(skip).limit(limit);
+            let query = { bucketId: bucket.bucketId };
+            if(!search || search.trim() !== ''){                
+                query.fileName = { $regex: search, $options: 'i' };
+            }
+            bucketData = await File.find(query, { userId: 0, thumbnail: 0, fileUrl: 0 }).skip(skip).limit(limit);
 
-            const totalFiles = await File.countDocuments({ bucketId: bucket.bucketId });
+            const totalFiles = await File.countDocuments(query);
 
             // Send the updated data in the response
             res.status(200).json({ status: true, message: "Data found", data: bucketData, totalFiles, totalStorage, pagination: {
@@ -142,6 +148,8 @@ module.exports = {
                 }
             });
         } catch (error) {
+            console.log("----------------error----------------")
+            console.log(error)
             return res.status(500).json({ status: false, message: "Server Error", error });
         }
     },

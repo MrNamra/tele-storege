@@ -55,7 +55,7 @@ const login = async (req, res) => {
 
 const profile = async (req, res) => {
     try {
-        const user = await User.findOne({ _id: req.user.id }, { password: 0, __v: 0, role: 0, createdAt: 0 });
+        const user = await User.findOne({ _id: req.user.id }, { _id: 0, password: 0, __v: 0, role: 0, createdAt: 0 });
         res.status(200).json({ status: true, message: 'Profile fetched successfully', user });
     } catch (error) {
         res.status(500).json({ status: false, message: 'Server Error', error });
@@ -81,7 +81,7 @@ const updateProfile = async (req, res) => {
     }
 
     const user = await User.findOneAndUpdate({ _id: userId },{ $set: updateFields },{ new: true, runValidators: true });
-    res.status(200).json({ status: true, message: 'Profile updated successfully', user });
+    res.status(200).json({ status: true, message: 'Profile updated successfully' });
 };
 
 const dashboard = async (req, res) => {
