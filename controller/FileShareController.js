@@ -4,7 +4,7 @@ const Bucket = require('../models/Bucket');
 const https = require('https');
 const bot = require('../src/bot');
 const mongoose = require('mongoose');
-const { handleFileUpload, deleteFileFromCloud } = require("../src/bot");
+const { handleFileUpload, deleteFileFromCloud, getFile } = require("../src/bot");
 
 // Share File
 const shareBucket = async (req, res) => {
@@ -139,7 +139,7 @@ const uploadFile = async (req, res) => {
         // bucket.storage = newStorage;
         // await bucket.save();
 
-        res.status(200).json({ status:true, message: 'Files uploaded successfully.', files: uploadResults });
+        res.status(200).json({ status:true, message: 'Files uploaded successfully.' });
     } catch (error) {
         console.error('Error uploading file:', error);
         res.status(500).json({ status:false, message: 'Internal server error.' });
