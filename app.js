@@ -5,6 +5,7 @@ const userRoutes = require('./routes/user');
 const bucketRoutes = require('./routes/bucket');
 const fileShareRoutes = require('./routes/fileShare');
 const thumbnailRoutes = require('./routes/thumbnailRoutes');
+const bodyParser = require('body-parser');
 const cors = require('cors')
 
 const https = require('https');
@@ -14,8 +15,11 @@ dotenv.config();
 const app = express();
 
 // Body parser middleware
+app.use(bodyParser.json({limit: '50mb'}));
+app.use(bodyParser.urlencoded({limit: '50mb', extended: true}));
 app.use(express.json());
 app.use(cors({ origin: '*' }));
+
 
 // app.use(express.static(path.join(__dirname, 'public')));
 
