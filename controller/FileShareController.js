@@ -1,29 +1,23 @@
+const mongoose = require('mongoose');
+const https = require('https');
 const FileShare = require('../models/FileShare');
 const File = require('../models/File');
 const Bucket = require('../models/Bucket');
-const https = require('https');
-const bot = require('../src/bot');
-const mongoose = require('mongoose');
 const { handleFileUpload, deleteFileFromCloud, getFile } = require("../src/bot");
 
 // Share File
 const shareBucket = async (req, res) => {
     const { bucketId, password, expiresAt } = req.body;
+    if (!mongoose.Types.ObjectId.isValid(bucketId)) return res.status(404).json({ status: false, message: 'Invalid Bucket ID' });
     
     const expiresAtDate = new Date(expiresAt||null);
     // if ((expiresAt!='undefined' || expiresAt != '')) {
         // if(isNaN(expiresAtDate)) return res.status(400).json({ message: 'Invalid date format for expiresAt' });
     // }
 
-    if(!bucketId) return res.status(400).json({ status: false, message: 'BucketId is required' });
+    const bucket = await Bucket.findOne({_id: bucketId, userId: req.user.id});
 
-    if(!mongoose.Types.ObjectId.isValid(bucketId)) return res.status(400).json({ status: false, message: 'BucketId is invalid' });
-
-    const bucketData = await Bucket.findOne({_id:bucketId, userId:req.user.id});
-
-    if(!bucketData) return res.status(400).json({ status: false, message: 'Bucket not found' });
-
-    const userId = req.user.id;
+    if(!bucket) return res.status(404).json({ status: false, message: 'Bucket not found' });
 
     try {
         let fileShare = await FileShare.findOne({ bucketId: bucketId });
@@ -35,7 +29,7 @@ const shareBucket = async (req, res) => {
             });
         } else {
             fileShare = new FileShare({
-                userId,
+                userId: bucket.userId,
                 bucketId,
                 password: password || null,
                 expiresAt: expiresAtDate || null,
@@ -61,14 +55,8 @@ const accessFile = async (req, res) => {
         const fileData = await File.findOne({ fileId });
         if (!fileData) return res.status(400).json({ status: false, message: 'File not found!' });
 
-        const bucketData = await Bucket.findOne({ _id: fileData.bucketId, userId });
-        if(!bucketData) return res.status(400).json({ status:false, message:"File not found!" });
-
-        // Or fetch the file and stream it to the client
-        // const fileResponse = await axios.get(fileData.fileUrl, { responseType: 'stream' });
-        // res.setHeader('Content-Type', fileResponse.headers['content-type']);
-        // res.setHeader('Content-Disposition', `inline; filename="${fileData.fileName}"`);
-        // fileResponse.data.pipe(res);
+        const bucket = await Bucket.findOne({ _id: fileData.bucketId, userId });
+        if(!bucket) return res.status(404).json({ status:false, message:"File not found!" });
 
         https.get(fileData.fileUrl, (fileRes) => {
             const contentType = fileRes.headers['content-type'];
@@ -90,54 +78,40 @@ const endShare = async (req, res) => {
     const { code } = req.params;
     const fileShare = await FileShare.findOne({ code });
     if(!fileShare) return res.status(400).json({ status:false, message:"Data not found!" });
-    console.log(fileShare, userId);
+
     if(!fileShare.userId.equals(userId)) return res.status(400).json({ status:false, message:"Something went wrong!" });
+
     await FileShare.deleteOne({ code });
     return res.status(200).json({ status:true, message:"Sharing ended successfully!" });
 };
 
 // Upload file
 const uploadFile = async (req, res) => {
-    const { bucketId } = req.body;
-    const userId = req.user.id;
-
-    if (!req.files || req.files.length === 0) {
-        return res.status(400).json({ status: false, message: 'At least one file is required.' });
-    }
-    
     try {
+        const { bucketId } = req.body;
+        const userId = req.user.id;
+
+        if (!req.files || req.files.length === 0) return res.status(404).json({ status: false, message: 'At least one file is required.' });
+    
         const bucket = await Bucket.findById(bucketId);
-        if(!bucket) return res.status(400).json({ status:false, message: 'Bucket not found.' });
+        if(!bucket) return res.status(404).json({ status:false, message: 'Bucket not found.' });
 
         let totalAddedSize = 0;
         let uploadResults = [];
 
-        // const fileBuffer = req.file.buffer;
-        // const originalFileName = req.file.originalname;
-        // const fileSizeInBytes = req.file.size;
-        // const fileSizeInMB = fileSizeInBytes / (1024 * 1024);
-
-        // if (!req.file) return res.status(400).json({ status:false, message: 'File is required.' });
-
-        // const uploadResult = await handleFileUpload(fileBuffer, bucketId, originalFileName, userId);
         for (const file of req.files) {
             const { buffer, originalname, size } = file;
             const fileSizeInMB = size / (1024 * 1024);
             totalAddedSize += fileSizeInMB;
 
-            const uploadResult = await handleFileUpload(buffer, bucketId, originalname, userId);
+            const uploadResult = await handleFileUpload(buffer, bucketId, originalname, bucket.groupId, userId);
             console.log("---------------uploadResult---------------");
-            console.log(uploadResult);
+            // console.log(uploadResult);
             uploadResults.push(uploadResult);
         }
 
         bucket.storage += totalAddedSize;
         await bucket.save();
-
-
-        // const newStorage = bucket.storage + fileSizeInMB;
-        // bucket.storage = newStorage;
-        // await bucket.save();
 
         res.status(200).json({ status:true, message: 'Files uploaded successfully.' });
     } catch (error) {
@@ -147,20 +121,16 @@ const uploadFile = async (req, res) => {
 };
 
 const uploadFileByCode = async (req, res) => {
-    const { password } = req.body;
-    const code = req.params.code;
-    if (req.files.length === 0) {
-        return res.status(400).json({ status: false, message: 'At least one file is required.' });
-    }
-    
     try {
+        const { password } = req.body;
+        const code = req.params.code;
+        if (req.files.length === 0) return res.status(404).json({ status: false, message: 'At least one file is required.' });
+    
         const fileShare = await FileShare.findOne({ code :code });
-        if(!fileShare) return res.status(400).json({ status:false, message: 'data not found.' });
-        if(fileShare.password && fileShare.password !== password) return res.status(400).json({ status:false, message: 'Password is incorrect.' });
-
+        if (!fileShare || (fileShare.password && fileShare.password !== password)) return res.status(400).json({ status:false, message: 'data not found.' });
 
         const bucket = await Bucket.findById(fileShare.bucketId);
-        if(!bucket) return res.status(400).json({ status:false, message: 'Bucket not found.' });
+        if(!bucket) return res.status(404).json({ status:false, message: 'Bucket not found.' });
 
         let totalAddedSize = 0;
         let uploadResults = [];
@@ -170,7 +140,7 @@ const uploadFileByCode = async (req, res) => {
             const fileSizeInMB = size / (1024 * 1024);
             totalAddedSize += fileSizeInMB;
 
-            const uploadResult = await handleFileUpload(buffer, fileShare.bucketId, originalname);
+            const uploadResult = await handleFileUpload(buffer, fileShare.bucketId, originalname, bucket.groupId);
             uploadResults.push(uploadResult);
         }
 
@@ -190,21 +160,20 @@ const deleteUploadFile = async (req, res) => {
         const userId = req.user.id;
         
         const fileData = await File.findById(fileId);
-        if(!fileData) return res.status(404).json({ status:false, message:"Data not found!" });
+        if(!fileData) return res.status(404).json({ status:false, message:"File not found!" });
         
         const bucket = await Bucket.findById(fileData.bucketId);
         if(!bucket) return res.status(404).json({ status:false, message:"Bucket not found!" });
         
         if(!bucket.userId.equals(userId)) return res.status(400).json({ status:false, message:"Something went wrong!" });
 
-        const fileInfo = await getFile(fileData.fileId);
-        
+        const fileInfo = await getFile(bucket.groupId, fileData.fileId);
         const fileSize = fileInfo.file_size ? fileInfo.file_size / (1024 * 1024) : 0;
 
         bucket.storage = Math.max(bucket.storage - fileSize, 0);
         await bucket.save();
     
-        await deleteFileFromCloud(fileData.messageId);
+        await deleteFileFromCloud(bucket.groupId, fileData.messageId);
     
         await File.deleteOne({ _id: fileId });
         return res.status(200).json({ status:true, message:"File deleted successfully!" });

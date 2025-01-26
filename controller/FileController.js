@@ -56,7 +56,7 @@ const deleteFile = async (req, res) => {
   if (!bucket) return res.status(400).json({ status: false, message: 'Bucket not found.' });
 
 
-  const cloudResponse = await deleteFileFromCloud(file.messageId);
+  const cloudResponse = await deleteFileFromCloud(bucket.groupId, file.messageId);
 
   if (!cloudResponse.status) return res.status(400).json({ status: false, message: 'Failed to delete file from Telegram.' });
 

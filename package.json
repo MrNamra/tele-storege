@@ -12,6 +12,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@mtproto/core": "^6.3.0",
     "axios": "^1.7.9",
     "bcrypt": "^5.1.1",
     "body-parser": "^1.20.3",
@@ -25,11 +26,13 @@
     "load-esm": "^1.0.1",
     "mime-types": "^2.1.35",
     "mongoose": "^8.9.5",
+    "mtproto-core": "^6.3.0",
     "multer": "^1.4.5-lts.1",
     "node-telegram-bot-api": "^0.66.0",
     "nodemon": "^3.1.9",
     "passport": "^0.7.0",
     "sharp": "^0.33.5",
+    "telegram": "^2.26.16",
     "validator": "^13.12.0"
   }
 }

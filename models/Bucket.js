@@ -6,6 +6,10 @@ const BucketSchema = mongoose.Schema({
         ref: "User",
         required: true,
       },
+      groupId: {
+        type: String,
+        required: false,
+      },
       storage: {
         type: Number,
         required: false,
@@ -15,6 +19,14 @@ const BucketSchema = mongoose.Schema({
       bucketName: {
         type: String,
         required: true,
+      },
+      accessHash: {
+        type: String,
+        required: false,
+      },
+      inviteLink: {
+        type: String,
+        required: false,
       },
       createdAt: {
         type: Date,

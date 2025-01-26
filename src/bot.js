@@ -1,101 +1,160 @@
-const fs = require('fs');
-const axios = require('axios');
-const TelegramBot = require('node-telegram-bot-api');
-const dotenv = require('dotenv');
+const { Api, TelegramClient } = require('telegram');
+const { StringSession } = require('telegram/sessions');
 const File = require("../models/File");
-// const fileType = require('file-type');
+const Bucket = require("../models/Bucket");
+require('dotenv').config();
 
-dotenv.config();
+const apiId = Number(process.env.API_ID);
+const apiHash = process.env.API_HASH;
+const sessionString = process.env.STRING_SESSION;
 
-// Create a new instance of the bot using the token
-const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
+// Initialize Telegram Client
+const client = new TelegramClient(new StringSession(sessionString), apiId, apiHash, { connectionRetries: 5 });
+
+(async () => {
+  try {
+    await client.connect();
+    console.log("Telegram Client Connected Successfully!");
+  } catch (error) {
+    console.error("Error connecting to Telegram Client:", error);
+  }
+})();
 
 // Function to handle file upload to Telegram and save metadata in DB
-const handleFileUpload = async (fileBuffer, bucketId, originalFileName, userId = null) => {
+const handleFileUpload = async (fileBuffer, bucketId, fileName, groupId, userId = null) => {
   try {
-    const tempFilePath = `./uploads/${originalFileName}`;
-    fs.writeFileSync(tempFilePath, fileBuffer);
+    if (!Buffer.isBuffer(fileBuffer)) {
+      console.error("Invalid file buffer");
+      throw new Error("Invalid file buffer");
+    }
 
+    const fileSize = Buffer.byteLength(fileBuffer);
+    const partSize = 10 * 1024 * 1024;  // 10MB per part (max allowed by Telegram)
+    const fileTotalParts = Math.ceil(fileSize / partSize); // Calculate total parts based on part size
 
-    // Send the document to Telegram chat
-    const message = await bot.sendDocument(process.env.CHAT_ID, tempFilePath, {
-      filename: originalFileName,
-      content: fs.createReadStream(tempFilePath),
-    }, { caption: `${bucketId}` });
+    // If file is smaller than or equal to 10MB, upload as a single part
+    if (fileSize <= partSize) {
+      console.log("Uploading a small file (under 10MB) as a single part...");
+      const uploadedFile = await client.uploadFile({
+        file: fileBuffer,
+        name: fileName,
+        workers: 2,
+      });
 
-    fs.unlinkSync(tempFilePath);
+      console.log("File uploaded successfully!");
+      const message = await client.sendMessage(groupId, {
+        message: `File from bucket ${bucketId}`,
+        media: new Api.InputMediaUploadedDocument({
+          file: uploadedFile,
+          mimeType: 'application/octet-stream',
+        }),
+      });
 
-    console.log("Telegram API Response:", message);
+      console.log("Message sent successfully!");
 
-    // Extract file details
-    let fileId, fileName, fileType, fileUrl, thumbnailUrl = null;
-    if (message.document) {
-      fileId = message.document.file_id;
-      fileName = message.document.file_name || originalFileName;
-      fileType = message.document.mime_type;
-    } else if (message.photo) {
-      fileId = message.photo[message.photo.length - 1].file_id; // Get highest resolution image
-      fileName = originalFileName;
-      fileType = "image/jpeg"; // Telegram returns photos as JPEG
-    } else if (message.video) {
-      fileId = message.video.file_id;
-      fileName = message.video.file_name || originalFileName;
-      fileType = message.video.mime_type;
-    } else if (message.audio) {
-      fileId = message.audio.file_id;
-      fileName = message.audio.file_name || originalFileName;
-      fileType = message.audio.mime_type;
+      const fileType = message.media.document.mimeType;
+      const newFile = new File({
+        fileId: message.media.document.id.toString(),
+        fileName,
+        fileUrl: null,  // No URL needed in DB
+        messageId: message.id,
+        fileType,
+        bucketId,
+        userId,
+      });
+
+      await newFile.save();
+
+      return { success: true, fileId: message.media.document.id.toString(), fileName, fileType, bucketId, userId };
+
     } else {
-      console.error("Telegram API did not return a recognized file type:", message);
-      throw new Error("Unsupported file type returned by Cloud.");
-    }
-    
-    fileUrl = await bot.getFileLink(fileId);
+      // Handle large files by splitting them into smaller parts (10MB each)
+      let partCount = 0;
+      let fileId;
 
-    let thumbnailId = null;
-    if (message.document?.thumbnail) {
-      thumbnailId = message.document.thumbnail.file_id;
-    } else if (message.photo) {
-      thumbnailId = message.photo[0].file_id; // Use first photo in array
-    } else if (message.video?.thumbnail) {
-      thumbnailId = message.video.thumbnail.file_id;
-    }
+      console.log(`Uploading large file in parts... Total parts: ${fileTotalParts}`);
 
-    if (thumbnailId) {
-      try {
-        const fileInfo = await bot.getFile(thumbnailId);
-        console.log("Thumbnail Info:", fileInfo);
-        thumbnailUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${fileInfo.file_path}`;
-      } catch (thumbnailError) {
-        console.error("Error fetching thumbnail:", thumbnailError);
+      while (partCount < fileTotalParts) {
+        // Ensure each part does not exceed 10MB
+        const partBuffer = fileBuffer.slice(partCount * partSize, Math.min((partCount + 1) * partSize, fileSize));
+        
+        if (partBuffer.length === 0) {
+          console.error("File part is empty!");
+          break;
+        }
+
+        // Upload the first part to initialize the fileId
+        if (partCount === 0) {
+          const result = await client.invoke(new Api.upload.SaveBigFilePart({
+            filePart: partCount + 1,
+            fileTotalParts: fileTotalParts,
+            bytes: partBuffer,
+          }));
+
+          fileId = result.fileId;  // Store the fileId for future parts
+          console.log(`Uploaded first part, fileId: ${fileId}`);
+        } else {
+          // Upload subsequent parts using the same fileId
+          await client.invoke(new Api.upload.SaveBigFilePart({
+            fileId: fileId,
+            filePart: partCount + 1,
+            fileTotalParts: fileTotalParts,
+            bytes: partBuffer,
+          }));
+
+          console.log(`Uploaded part ${partCount + 1} of ${fileTotalParts}`);
+        }
+
+        partCount++;
       }
+
+      // Once all parts are uploaded, send the file to the group
+      const uploadedFile = await client.uploadFile({
+        file: fileBuffer,
+        name: fileName,
+        workers: 2,
+      });
+
+      console.log("File uploaded successfully!");
+
+      const message = await client.sendMessage(groupId, {
+        message: `File from bucket ${bucketId}`,
+        media: new Api.InputMediaUploadedDocument({
+          file: uploadedFile,
+          mimeType: 'application/octet-stream',
+        }),
+      });
+
+      console.log("Message sent successfully!");
+
+      const fileType = message.media.document.mimeType;
+      const newFile = new File({
+        fileId: message.media.document.id.toString(),
+        fileName,
+        fileUrl: null,  // No URL needed in DB
+        messageId: message.id,
+        fileType,
+        bucketId,
+        userId,
+      });
+
+      await newFile.save();
+
+      return { success: true, fileId: fileId.toString(), fileName, fileType, bucketId, userId };
     }
 
-    // Save the file metadata to the database (not the actual file)
-    const newFile = new File({
-      fileId: fileId,
-      fileName: originalFileName,
-      fileUrl: fileUrl,
-      messageId: message.message_id,
-      fileType: fileType,
-      thumbnail: thumbnailUrl,
-      bucketId: bucketId,
-      userId: userId,
-    });
-
-    await newFile.save();
-
-    return { success: true, fileId, fileName, fileType, fileUrl: fileUrl, bucketId, userId };
   } catch (error) {
-    console.error("Error uploading file to Telegram:", error);
-    throw error;
+    console.error("Error during file upload:", error);
+    return false;
   }
 };
 
+
+
 // Delete file from Telegram
-const deleteFileFromCloud = async (messageId) => {
+const deleteFileFromCloud = async (groupId, messageId) => {
   try {
-    await bot.deleteMessage(process.env.CHAT_ID, messageId);
+    await client.deleteMessage(groupId, [messageId]);
     return { status: true, message: 'File deleted successfully.' };
   } catch (error) {
     console.error("Error deleting file from Cloud:", error);
@@ -103,62 +162,27 @@ const deleteFileFromCloud = async (messageId) => {
   }
 }
 
-const getFile = async (fileId) => {
-  const fileInfo = await bot.getFile(fileId);
-  return fileInfo;
-}
-
-// this function is no need to use
-async function getThumbnail(fileId) {
+const getFile = async (groupId, fileId) => {
   try {
-    const response = await axios.get(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/getFile?file_id=${fileId}`);
+    const result = await client.getMessages(groupId, { ids: [fileId] });
 
-    if (response.data.ok) {
-      const filePath = response.data.result.file_path;
-      const fileUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${filePath}`;
+    if (result && result.length > 0) {
+      const message = result[0];
 
-      // Fetch the file as a buffer (arraybuffer)
-      const imageResponse = await axios.get(fileUrl, { responseType: 'arraybuffer' });
-      console.log("imageResponse----------------");
-      console.log(imageResponse);
-
-      // Use file-type to check if it's an image based on binary data
-      // const type = await fileType.fromBuffer(imageResponse.data);
-
-      // // If the file is an image, convert to base64
-      // if (type && type.mime && type.mime.startsWith('image')) {
-        const buffer = Buffer.from(imageResponse.data).toString('base64');
-        let base64 = `data:${imageResponse.headers['content-type']};base64,${buffer.toString('base64')}`;
-        console.log("base64----------------");
-        console.log(base64);
-        console.log("-------------------------------------------");
-        return base64;
-      // } else {
-      //   console.log('Not an image file');
-      //   return null;
-      // }
-    } else {
-      return null;
+      if (message.media && message.media.document) {
+        return { status: true, fileId: message.media.document.id, file_size: (message.media.document.size * 1024 * 1024) };
+      }
     }
+    return { status: false, message: "File not found." };
   } catch (error) {
-    console.error('Error fetching thumbnail:', error);
-    return null;
+    console.error("Error fetching file from Telegram:", error);
+    return { status: false, message: "Failed to fetch file from Telegram." };
   }
 }
-
-// Respond to /start command
-bot.onText(/\/start/, (msg) => {
-  bot.sendMessage(msg.chat.id, "Welcome to TGStorage! You can upload files.");
-});
-
-// Optionally, log any errors with the bot
-bot.on("polling_error", (error) => {
-  console.log(error);
-});
 
 module.exports = {
   handleFileUpload,
   deleteFileFromCloud,
-  getThumbnail,
-  getFile
+  getFile,
+  client
 };
