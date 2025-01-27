@@ -1,16 +1,20 @@
-const { Api, TelegramClient } = require('telegram');
-const { StringSession } = require('telegram/sessions');
-const fs = require('fs');
+const { Api, TelegramClient } = require("telegram");
+const { StringSession } = require("telegram/sessions");
 const File = require("../models/File");
 const Bucket = require("../models/Bucket");
-require('dotenv').config();
+require("dotenv").config();
 
 const apiId = Number(process.env.API_ID);
 const apiHash = process.env.API_HASH;
 const sessionString = process.env.STRING_SESSION;
 
 // Initialize Telegram Client
-const client = new TelegramClient(new StringSession(sessionString), apiId, apiHash, { connectionRetries: 5 });
+const client = new TelegramClient(
+  new StringSession(sessionString),
+  apiId,
+  apiHash,
+  { connectionRetries: 5 }
+);
 
 (async () => {
   try {
@@ -21,91 +25,95 @@ const client = new TelegramClient(new StringSession(sessionString), apiId, apiHa
   }
 })();
 
-const handleFileUpload = async (fileBuffer, bucketId, fileName, groupId, userId = null) => {
+const handleFileUpload = async (fileBuffer, bucketId, fileName, groupId, accessHash, userId = null) => {
   try {
-    // Ensure client is connected
-    if (!client.connected) {
-      await client.connect();
-    }
-
-    // Validate file buffer
     if (!Buffer.isBuffer(fileBuffer)) {
-      console.error("Invalid file buffer");
       throw new Error("Invalid file buffer");
     }
 
-    // Fetch the channel information using the groupId
-    const channelResponse = await client.invoke(
-      new Api.channels.GetChannels({
-        id: [groupId]  // Use the groupId here directly
-      })
-    );
+    // Create a valid InputPeerChannel object
+    const peer = new Api.InputPeerChannel({
+      channelId: Number(groupId),
+      accessHash: BigInt(accessHash),
+    });
 
-    console.log("channelResponse:", channelResponse);
+    // Fetch group details
+    const channelResponse = await client.invoke(new Api.channels.GetChannels({ id: [peer] }));
 
-    // Make sure the channel data is correctly returned
+    // Validate group response
     const channel = channelResponse.chats && channelResponse.chats[0];
     if (!channel || !channel.id || !channel.accessHash) {
       throw new Error("Could not find the specified group/channel");
     }
 
-    // Create InputPeerChannel with resolved channel ID and accessHash
-    const peer = new Api.InputPeerChannel({
-      channelId: channel.id,
-      accessHash: channel.accessHash
-    });
+    const fileSize = fileBuffer.length;
+    const partSize = 512 * 1024; // 512KB per part
+    const totalParts = Math.ceil(fileSize / partSize);
+    const fileId = BigInt(Math.floor(Math.random() * -Math.pow(2, 32))); // Random file ID
 
-    const fileSize = Buffer.byteLength(fileBuffer);
-    const partSize = 512 * 1024;  // 512KB per part
-    const fileId = BigInt(Math.floor(Math.random() * -Math.pow(2, 32))); // Random fileId
+    for (let part = 0; part < totalParts; part++) {
+      const start = part * partSize;
+      const end = Math.min(start + partSize, fileSize);
+      const fileChunk = fileBuffer.slice(start, end);
 
-    // Upload the file parts if the file is larger than the allowed part size
-    if (fileSize <= partSize) {
-      const result = await client.invoke(
-        new Api.upload.SaveFilePart({
+      await client.invoke(
+        new Api.upload.SaveBigFilePart({
           fileId: fileId,
-          filePart: 0,  // For the first part (you can adjust this depending on the logic)
-          bytes: fileBuffer
+          filePart: part,
+          fileTotalParts: totalParts,
+          bytes: fileChunk,
         })
       );
-
-      if (!result || !result.success) {
-        throw new Error("Failed to upload file part");
-      }
-    } else {
-      // Multi-part upload logic (you can keep this from your previous code)
-      console.log("Uploading large file in parts...");
-      // Upload parts as needed (keep the existing multi-part upload logic)
     }
 
-    // Send the uploaded file to the group using the correct peer
+    // Create InputFileBig object
+    const inputFile = new Api.InputFileBig({
+      id: fileId,
+      parts: totalParts,
+      name: fileName,
+    });
+
+    // Send the uploaded file to the group
     const message = await client.sendMessage(peer, {
       message: `File from bucket ${bucketId}`,
-      file: {
-        id: fileId,
-        parts: Math.ceil(fileSize / partSize),
-        name: fileName,
-        size: fileSize
-      }
+      file: inputFile,
     });
 
-    if (!message || !message.media || !message.media.document) {
-      throw new Error("Failed to send file message");
+    // Validate response
+    if (!message.media || !message.media.document) {
+      console.error("Telegram response error:", message);
+      throw new Error("Failed to send file message or document is missing.");
     }
 
-    // Save file information in the database
-    const fileType = message.media.document.mimeType;
-    const newFile = new File({
-      fileId: message.media.document.id.toString(),
-      fileName,
-      fileUrl: null,
-      messageId: message.id,
-      fileType,
-      bucketId,
-      userId,
-    });
+    const fileIdToGetUrl = message.media.document.id;
+    const accesshash = message.media.document.accessHash;
 
-    await newFile.save();
+    const fileResponse = await client.invoke(
+      new Api.upload.GetFile({
+        location: new Api.InputDocumentFileLocation({
+          id: fileIdToGetUrl,
+          accessHash: BigInt(accesshash),
+        }),
+        offset: 0,
+        limit: 1,
+      })
+    );
+
+    // Get file type, fallback to a default MIME type
+    const fileType = message.media.document.mimeType || "application/octet-stream";
+
+    // Save file information in the database
+    // const newFile = new File({
+    //   fileId: message.media.document.id.toString(),
+    //   fileName,
+    //   fileUrl: null,
+    //   messageId: message.id,
+    //   fileType,
+    //   bucketId,
+    //   userId,
+    // });
+
+    // await newFile.save();
 
     return {
       success: true,
@@ -113,7 +121,7 @@ const handleFileUpload = async (fileBuffer, bucketId, fileName, groupId, userId 
       fileName,
       fileType,
       bucketId,
-      userId
+      userId,
     };
   } catch (error) {
     console.error("Error during file upload:", error);

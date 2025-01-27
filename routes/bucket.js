@@ -12,7 +12,7 @@ router.get('/display/:bucketId', jwtAuthMiddleware, BucketController.showBucket)
 router.get('/display/:bucketId/:fileId', jwtAuthMiddleware, BucketController.showBucketFile);
 
 router.get('/show/:code', BucketController.showBucket);
-router.get('/show/:code/:file_id', BucketController.showBucketFile);
+router.get('/show/:code/:fileId', BucketController.showBucketFile);
 // Share file route
 router.post('/share', jwtAuthMiddleware, fileShareController.shareBucket);
 router.delete('/end-share/:code', jwtAuthMiddleware, fileShareController.endShare);

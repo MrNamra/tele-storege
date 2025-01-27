@@ -15,45 +15,45 @@ module.exports = {
 
         // try {
 
-            const userData = await User.findById(userId);
-            if (!userData) return res.status(400).json({ status: false, message: "User not found!" });
+        const userData = await User.findById(userId);
+        if (!userData) return res.status(400).json({ status: false, message: "User not found!" });
 
-            if (userData.bucketAllowed < 1) return res.status(400).json({ status: false, message: "You have no bucket allowed!" });
+        if (userData.bucketAllowed < 1) return res.status(400).json({ status: false, message: "You have no bucket allowed!" });
 
-            await client.connect();
-            const result = await client.invoke(
-                new Api.channels.CreateChannel({
-                    title: bucketName,
-                    about: "Storage Group for " + bucketName,
-                    megagroup: true,
-                })
-            );
+        await client.connect();
+        const result = await client.invoke(
+            new Api.channels.CreateChannel({
+                title: bucketName,
+                about: "Storage Group for " + bucketName,
+                megagroup: true,
+            })
+        );
 
-            console.log("result:", result);
-            const groupId = result.updates.find(update => update.className === 'UpdateChannel').channelId;
-            const accessHash = result.chats[0].accessHash;
-            const inviteLink = await client.invoke(
-                new Api.messages.ExportChatInvite({ peer: groupId })
-            );
+        console.log("result:", result);
+        const groupId = result.updates.find(update => update.className === 'UpdateChannel').channelId;
+        const accessHash = result.chats[0].accessHash;
+        const inviteLink = await client.invoke(
+            new Api.messages.ExportChatInvite({ peer: groupId })
+        );
 
-            // Creating a new bucket with a unique bucketId
-            const newBucket = new Bucket({
-                userId,
-                bucketName,
-                groupId,
-                accessHash,
-                inviteLink: inviteLink.link,
-                storageUsed: 0,
-            });
+        // Creating a new bucket with a unique bucketId
+        const newBucket = new Bucket({
+            userId,
+            bucketName,
+            groupId,
+            accessHash,
+            inviteLink: inviteLink.link,
+            storageUsed: 0,
+        });
 
-            // Save to database
-            await newBucket.save();
-            
-            userData.bucketAllowed = userData.bucketAllowed - 1;
-            userData.bucketCount = userData.bucketCount + 1;
-            await userData.save();
+        // Save to database
+        await newBucket.save();
 
-            return res.status(201).json({ status: true, message: 'Bucket created successfully', bucket: newBucket });
+        userData.bucketAllowed = userData.bucketAllowed - 1;
+        userData.bucketCount = userData.bucketCount + 1;
+        await userData.save();
+
+        return res.status(201).json({ status: true, message: 'Bucket created successfully', bucket: newBucket });
         // } catch (error) {
         //     return res.status(500).json({ status: false, message: 'Server Error', error: error.message });
         // }
@@ -116,7 +116,7 @@ module.exports = {
                     message: 'Group ID or Hash not found for this bucket. Cannot update group name.',
                 });
             }
-    
+
             // Save the updated bucket details to database
             await bucket.save();
     
@@ -245,13 +245,15 @@ module.exports = {
                 .filter(msg => msg.media && msg.media.document) // Ensure message contains a file
                 .map(msg => {
                     const document = msg.media.document;
-                    const fileNameAttr = document.attributes.find(attr => attr._ === "DocumentAttributeFilename");
-    
+
+                    // Extract file name correctly
+                    const fileNameAttr = document.attributes.find(attr => attr.className === "DocumentAttributeFilename");
+
                     return {
                         fileId: msg.id,
-                        fileName: fileNameAttr ? fileNameAttr.file_name : "Unknown",
+                        fileName: fileNameAttr ? fileNameAttr.fileName : "Unknown",
                         fileSize: document.size,
-                        mimeType: document.mime_type,
+                        mimeType: document.mimeType,
                         date: msg.date,
                     };
                 });
@@ -268,8 +270,8 @@ module.exports = {
                 })
             );
 
-            const totalFiles = (totalFilesResponse) ? totalFilesResponse.count : 0;
-    
+            const totalFiles = (totalFilesResponse) ? totalFilesResponse.count - 1 : 0;
+
             return res.status(200).json({
                 status: true,
                 message: "Success",
@@ -291,47 +293,152 @@ module.exports = {
     // Show Bucket File
     showBucketFile: async (req, res) => {
         try {
-            const { code, file_id } = req.params;
-            const fileInfo = await FileShare.findOne({ code: code });
-            if (!fileInfo) return res.status(404).json({ status: false, message: "File not found!" });
+            const { bucketId, fileId, code } = req.params;
+    
+            let bucket;
+            if(bucketId){
+                bucket = await Bucket.findById(bucketId);
+            }
+            if(code){
+                const tmpBucket = await FileShare.findOne({code})
+                bucket = await Bucket.findById(tmpBucket.bucketId);
+            }
 
-            const bucket = await Bucket.findById(fileInfo.bucketId);
-            if (!bucket || !bucket.groupId) return res.status(400).json({ status: false, message: "Bucket not found or missing On Server!" });
-
+            if (!bucket || !bucket.groupId) {
+                console.error(`Bucket not found or missing groupId for bucketId: ${bucketId}`);
+                return res.status(400).json({ status: false, message: "Bucket not found or missing on server!" });
+            }
+    
+            const groupId = bucket.groupId;
+            const accessHash = bucket.accessHash;
+    
+            console.log(`Fetching file for Bucket ID: ${bucketId}, Group ID: ${groupId}, File ID: ${fileId}`);
+    
+            // Create a peer object for the group
             const peer = new Api.InputPeerChannel({
-                channelId: Number(bucket.groupId),
-                accessHash: BigInt(bucket.accessHash),
+                channelId: Number(groupId),
+                accessHash: BigInt(accessHash),
             });
-
+    
+            // Fetch message containing the file from the group
             const messages = await client.invoke(new Api.messages.GetHistory({
                 peer: peer,
-                limit: 1,
-                addOffset: 0,
-                minId: Number(file_id),
-                maxId: Number(file_id) + 1,
-                })
-            );
-
-            const message = messages.messages.find(msg => msg.id == file_id)
-            if (!message || !message.media || !message.media.document) return res.status(400).json({ status: false, message: "File not found in Telegram group!" });
-
+                minId: Number(fileId) - 1,
+                maxId: Number(fileId) + 1,
+            }));
+    
+            let message = messages.messages.find(msg => msg.id == fileId);
+            if (!message || !message.media || !message.media.document) {
+                console.error(`File not found or no document found for fileId: ${fileId}`);
+                return res.status(404).json({ status: false, message: "File not found in Server Bucket!" });
+            }
+    
             const document = message.media.document;
+            console.log("Document retrieved: ", document);
+    
+            const fileReference = document.fileReference || Buffer.alloc(0); // Default to an empty buffer if undefined
+            const thumbSize = document.thumbs && document.thumbs[0] ? document.thumbs[0].type : ""; // Use an empty string if no thumbs
+    
+            // Extract file name from document attributes
             const fileNameAttr = document.attributes.find(attr => attr._ === "DocumentAttributeFilename");
             const fileName = fileNameAttr ? fileNameAttr.file_name : "unknown_file";
-            const fileMimeType = document.mime_type;
-
+            const fileMimeType = document.mimeType;
+    
+            console.log(`File name: ${fileName}, Mime type: ${fileMimeType}`);
+    
+            // Set the appropriate headers for streaming the file
             res.setHeader("Content-Type", fileMimeType);
             res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
-
-            await client.downloadFile(document, {
-                progressCallback: (progress, total) => {
-                    console.log(`Streaming: ${((progress / total) * 100).toFixed(2)}%`);
-                },
-                outputStream: res,
-            });
+    
+            const getFileData = async (location, offset, limit, retryCount = 0) => {
+                try {
+                    console.log(`Fetching file data at offset ${offset} with limit ${limit}, Retry Count: ${retryCount}`);
+    
+                    const fileResponse = await client.invoke(new Api.upload.GetFile({
+                        cdnSupported: true,
+                        location: location,
+                        offset: offset,
+                        limit: limit,
+                    }));
+    
+                    if (fileResponse && fileResponse.bytes) {
+                        return fileResponse.bytes;
+                    } else {
+                        throw new Error("Error retrieving file data.");
+                    }
+                } catch (error) {
+                    if (error.errorMessage.includes("FILE_REFERENCE_EXPIRED")) {
+                        if (retryCount >= 3) {
+                            console.error("Max retries reached for expired file reference.");
+                            throw new Error("Max retries reached for expired file reference.");
+                        }
+    
+                        console.log("File reference expired. Refetching the message to get a new reference.");
+    
+                        // Refetch the message to get a new file reference
+                        const newMessages = await client.invoke(new Api.messages.GetHistory({
+                            peer: peer,
+                            minId: Number(fileId) - 1,
+                            maxId: Number(fileId) + 1,
+                        }));
+    
+                        message = newMessages.messages.find(msg => msg.id == fileId);
+                        if (!message || !message.media || !message.media.document) {
+                            console.error("File not found after refetch.");
+                            throw new Error("File not found after refetch.");
+                        }
+    
+                        const newDocument = message.media.document;
+                        const newFileReference = newDocument.fileReference || Buffer.alloc(0);
+                        console.log("newDocument")
+                        console.log(newFileReference)
+                        const newLocation = new Api.InputDocumentFileLocation({
+                            id: newDocument.id,
+                            accessHash: newDocument.accessHash,
+                            fileReference: newFileReference,
+                            thumbSize: thumbSize,
+                        });
+    
+                        // Retry downloading with the new file reference
+                        return await getFileData(newLocation, offset, limit, retryCount + 1);
+                    } else {
+                        throw error;
+                    }
+                }
+            };
+    
+            // Prepare for chunked download
+            const filePart = 512 * 1024; // 512KB per chunk
+            let offset = 0;
+            const fileParts = [];
+    
+            // Loop to download the file in parts
+            while (offset < document.size) {
+                const fileData = await getFileData(
+                    new Api.InputDocumentFileLocation({
+                        id: document.id,
+                        accessHash: BigInt(document.accessHash),
+                        fileReference: fileReference,
+                        thumbSize: thumbSize,
+                    }),
+                    offset,
+                    filePart
+                );
+    
+                // Push each part to the array
+                fileParts.push(fileData);
+                offset += filePart;
+            }
+    
+            // Merge the downloaded parts
+            const fileData = Buffer.concat(fileParts);
+    
+            // Stream the file content directly to the response
+            res.send(fileData);
+    
         } catch (error) {
-            console.error("Error fetching file:", error);
-            return res.status(500).json({ status: false, message: 'Server Error', error });
+            console.error("Error streaming file:", error);
+            return res.status(500).json({ status: false, message: 'Streaming server error', error });
         }
     }
 }
