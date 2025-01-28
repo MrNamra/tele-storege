@@ -1,10 +1,9 @@
 const https = require('https');
 const File = require('../models/File');
-const { sanitizeFileId } = require('../utils/sanitizers');
 
 const getThumbNail = async (req, res) => {
     try {
-        const fileId = sanitizeFileId(req.params.fileId);
+        const { fileId } = req.params;
 
         const fileData = await File.findOne({ fileId: fileId });
         if (!fileData) return res.status(404).json({ status: false, message: "Thumbnail not found!" });

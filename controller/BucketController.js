@@ -64,8 +64,15 @@ module.exports = {
         const userId = req.user.id;
 
         try {
-            const buckets = await Bucket.find({ userId }, { userId: 0, __v: 0, inviteLink: 0 });
-            return res.status(200).json({ status: true, message: "Buckets found", buckets });
+            const buckets = await Bucket.find({ userId }, { userId: 0, __v: 0, inviteLink: 0, groupId: 0, accessHash: 0 });
+
+            buckets.data = await Promise.all(
+                buckets.map(async (bucket) => {
+                    const fileShare = await FileShare.findOne({ bucketId: bucket._id });
+                    return { ...bucket.toObject(), code: fileShare ? fileShare.code : null };
+                })
+            );
+            return res.status(200).json({ status: true, message: "Buckets found", bucket: buckets.data });
         } catch (error) {
             return res.status(500).json({ status: false, message: 'Server Error', error: error.message });
         }
@@ -98,7 +105,7 @@ module.exports = {
                         title: bucketName,
                     })
                     console.log("invoke:", invoke);
-    
+
                     // Call the API to update the group title
                     const result = await client.invoke(invoke);
 
@@ -119,7 +126,7 @@ module.exports = {
 
             // Save the updated bucket details to database
             await bucket.save();
-    
+
             return res.status(200).json({ status: true, message: 'Bucket updated successfully' });
         } catch (error) {
             console.error("Error in editBucket method:", error);
@@ -147,7 +154,7 @@ module.exports = {
                         channelId: Number(bucket.groupId),
                         accessHash: BigInt(bucket.accessHash),
                     });
-    
+
                     await client.invoke(new Api.channels.DeleteChannel({ channel: peer }));
                 } catch (error) {
                     console.error("Error deleting Bucket:", error);
@@ -181,21 +188,21 @@ module.exports = {
         let search = req.query.search || '';
         let page = parseInt(req.query.page) || 1;
         let limit = parseInt(req.query.limit) || 20;
-    
+
         if (isNaN(page) || page <= 0) page = 1;
         if (isNaN(limit) || limit <= 0) limit = 20;
-    
+
         const skip = (Math.max(page - 1, 0)) * limit;
-    
+
         try {
             let bucket = null;
             let totalStorage = 0;
-    
+
             // Find bucket based on code or bucketId
             if (code) {
                 bucket = await FileShare.findOne({ code });
                 if (!bucket) return res.status(404).json({ status: false, message: "Data not found!" });
-                
+
                 const tmpBucketData = await Bucket.findById(bucket.bucketId);
                 console.log("tmpBucketData:", tmpBucketData);
 
@@ -213,10 +220,10 @@ module.exports = {
 
             console.log("bucket:", bucket);
 
-            if (!bucket.groupId) return res.status(404).json({ status: false, message: "Bucket has no Telegram group!" });
-    
+            if (!bucket.groupId) return res.status(404).json({ status: false, message: "Bucket Data not found!" });
+
             const groupId = bucket.groupId;
-   
+
             // Fetch messages (files) from the Telegram group
             const messages = await client.invoke(
                 new Api.messages.GetHistory({
@@ -228,7 +235,7 @@ module.exports = {
                     addOffset: skip,
                 })
             );
-    
+
             if (!messages || messages.messages.length === 0) {
                 return res.status(200).json({
                     status: true,
@@ -239,7 +246,7 @@ module.exports = {
                     pagination: { currentPage: page, totalPages: 0, totalItems: 0 },
                 });
             }
-    
+
             // Extract file data from messages
             const bucketData = messages.messages
                 .filter(msg => msg.media && msg.media.document) // Ensure message contains a file
@@ -254,10 +261,10 @@ module.exports = {
                         fileName: fileNameAttr ? fileNameAttr.fileName : "Unknown",
                         fileSize: document.size,
                         mimeType: document.mimeType,
-                        date: msg.date,
+                        date: msg.date
                     };
                 });
-    
+
             // Get the total number of messages in the group
             const totalFilesResponse = await client.invoke(
                 new Api.messages.GetHistory({
@@ -289,18 +296,18 @@ module.exports = {
             return res.status(500).json({ status: false, message: "Server Error", error: error.message });
         }
     },
-    
+
     // Show Bucket File
     showBucketFile: async (req, res) => {
         try {
             const { bucketId, fileId, code } = req.params;
-    
+
             let bucket;
-            if(bucketId){
+            if (bucketId) {
                 bucket = await Bucket.findById(bucketId);
             }
-            if(code){
-                const tmpBucket = await FileShare.findOne({code})
+            if (code) {
+                const tmpBucket = await FileShare.findOne({ code })
                 bucket = await Bucket.findById(tmpBucket.bucketId);
             }
 
@@ -308,59 +315,57 @@ module.exports = {
                 console.error(`Bucket not found or missing groupId for bucketId: ${bucketId}`);
                 return res.status(400).json({ status: false, message: "Bucket not found or missing on server!" });
             }
-    
+
             const groupId = bucket.groupId;
             const accessHash = bucket.accessHash;
-    
-            console.log(`Fetching file for Bucket ID: ${bucketId}, Group ID: ${groupId}, File ID: ${fileId}`);
-    
+
             // Create a peer object for the group
             const peer = new Api.InputPeerChannel({
                 channelId: Number(groupId),
                 accessHash: BigInt(accessHash),
             });
-    
+
             // Fetch message containing the file from the group
             const messages = await client.invoke(new Api.messages.GetHistory({
                 peer: peer,
                 minId: Number(fileId) - 1,
                 maxId: Number(fileId) + 1,
             }));
-    
+
             let message = messages.messages.find(msg => msg.id == fileId);
             if (!message || !message.media || !message.media.document) {
                 console.error(`File not found or no document found for fileId: ${fileId}`);
                 return res.status(404).json({ status: false, message: "File not found in Server Bucket!" });
             }
-    
+
             const document = message.media.document;
             console.log("Document retrieved: ", document);
-    
+
             const fileReference = document.fileReference || Buffer.alloc(0); // Default to an empty buffer if undefined
             const thumbSize = document.thumbs && document.thumbs[0] ? document.thumbs[0].type : ""; // Use an empty string if no thumbs
-    
+
             // Extract file name from document attributes
             const fileNameAttr = document.attributes.find(attr => attr._ === "DocumentAttributeFilename");
             const fileName = fileNameAttr ? fileNameAttr.file_name : "unknown_file";
             const fileMimeType = document.mimeType;
-    
+
             console.log(`File name: ${fileName}, Mime type: ${fileMimeType}`);
-    
+
             // Set the appropriate headers for streaming the file
             res.setHeader("Content-Type", fileMimeType);
             res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
-    
+
             const getFileData = async (location, offset, limit, retryCount = 0) => {
                 try {
                     console.log(`Fetching file data at offset ${offset} with limit ${limit}, Retry Count: ${retryCount}`);
-    
+
                     const fileResponse = await client.invoke(new Api.upload.GetFile({
                         cdnSupported: true,
                         location: location,
                         offset: offset,
                         limit: limit,
                     }));
-    
+
                     if (fileResponse && fileResponse.bytes) {
                         return fileResponse.bytes;
                     } else {
@@ -372,22 +377,22 @@ module.exports = {
                             console.error("Max retries reached for expired file reference.");
                             throw new Error("Max retries reached for expired file reference.");
                         }
-    
+
                         console.log("File reference expired. Refetching the message to get a new reference.");
-    
+
                         // Refetch the message to get a new file reference
                         const newMessages = await client.invoke(new Api.messages.GetHistory({
                             peer: peer,
                             minId: Number(fileId) - 1,
                             maxId: Number(fileId) + 1,
                         }));
-    
+
                         message = newMessages.messages.find(msg => msg.id == fileId);
                         if (!message || !message.media || !message.media.document) {
                             console.error("File not found after refetch.");
                             throw new Error("File not found after refetch.");
                         }
-    
+
                         const newDocument = message.media.document;
                         const newFileReference = newDocument.fileReference || Buffer.alloc(0);
                         console.log("newDocument")
@@ -398,7 +403,7 @@ module.exports = {
                             fileReference: newFileReference,
                             thumbSize: thumbSize,
                         });
-    
+
                         // Retry downloading with the new file reference
                         return await getFileData(newLocation, offset, limit, retryCount + 1);
                     } else {
@@ -406,12 +411,12 @@ module.exports = {
                     }
                 }
             };
-    
+
             // Prepare for chunked download
             const filePart = 512 * 1024; // 512KB per chunk
             let offset = 0;
             const fileParts = [];
-    
+
             // Loop to download the file in parts
             while (offset < document.size) {
                 const fileData = await getFileData(
@@ -424,21 +429,113 @@ module.exports = {
                     offset,
                     filePart
                 );
-    
+
                 // Push each part to the array
                 fileParts.push(fileData);
                 offset += filePart;
             }
-    
+
             // Merge the downloaded parts
             const fileData = Buffer.concat(fileParts);
-    
+
             // Stream the file content directly to the response
             res.send(fileData);
-    
+
         } catch (error) {
             console.error("Error streaming file:", error);
             return res.status(500).json({ status: false, message: 'Streaming server error', error });
+        }
+    },
+
+    // delete Bucket Files
+    deleteBucketFile: async (req, res) => {
+        try {
+            const userId = req.user.id
+            const { bucketId, fileId } = req.params;
+            const bucket = await Bucket.findOne({ _id: bucketId, userId: userId});
+
+            if (!fileId || fileId.length < 1) return res.status(404).json({ status: false, message: "File ID Not Found!" })
+            if (!bucket) return res.status(404).json({ status: false, message: "Data Not Found!" })
+
+
+            const groupId = bucket.groupId;
+            const accessHash = bucket.accessHash;
+
+            let allMessages = [];
+            let offsetId = 0;
+            let limit = 100;
+            let hasMore = true;
+
+            while (hasMore) {
+                try {
+                    const messages = await client.invoke(new Api.messages.GetHistory({
+                        peer: new Api.InputPeerChannel({
+                            channelId: Number(groupId),
+                            accessHash: BigInt(accessHash),
+                        }),
+                        offsetId: offsetId,
+                        limit: limit,
+                    }));
+
+                    if (messages.messages.length === 0) {
+                        hasMore = false;
+                        break;
+                    }
+
+                    allMessages = allMessages.concat(messages.messages);
+                    offsetId = messages.messages[messages.messages.length - 1].id;
+
+                } catch (error) {
+                    console.error("Error fetching messages:", error);
+                    break;
+                }
+            }
+
+            let filesToDelete = Array.isArray(fileId) ? fileId.map(id => Number(id)) : [Number(fileId)];
+            let messagesToDelete = allMessages.filter(msg => filesToDelete.includes(msg.id));
+
+            if (messagesToDelete.length === 0) return res.status(404).json({ status: false, message: "No matching files found!" });
+
+            let totalSizeMB = messagesToDelete.reduce((acc, msg) => {
+                if (msg.media && msg.media.document && msg.media.document.size) {
+                    return acc + msg.media.document.size / (1024 * 1024); // Convert bytes to MB
+                }
+                return acc;
+            }, 0);
+
+            // Fetch message containing the file from the group
+            let result;
+            if (messagesToDelete[0].peerId.className === 'PeerChannel') {
+                // Use channels.DeleteMessages for supergroups
+                result = await client.invoke(new Api.channels.DeleteMessages({
+                    channel: new Api.InputChannel({
+                        channelId: Number(groupId),
+                        accessHash: BigInt(accessHash),
+                    }),
+                    id: messagesToDelete.map(msg => msg.id),
+                }));
+            } else {
+                // Use messages.DeleteMessages for regular groups
+                result = await client.invoke(new Api.messages.DeleteMessages({
+                    id: messagesToDelete.map(msg => msg.id),
+                    revoke: true,
+                }));
+            }
+
+            if (result.ptsCount > 0) {
+                if((bucket.storage - totalSizeMB) < 1){
+                    totalSizeMB = 0;
+                }
+                bucket.storage = Math.max(0, bucket.storage - totalSizeMB);
+                await bucket.save();
+
+                return res.status(200).json({ status: true, message: "Files deleted successfully" });
+            }
+
+            return res.status(400).json({ status: false, message: "Something went wrong, files not deleted!" });
+        } catch (error) {
+            console.error("Error streaming file:", error);
+            return res.status(500).json({ status: false, message: 'Internal Server error', error });
         }
     }
 }

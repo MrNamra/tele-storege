@@ -19,5 +19,6 @@ router.delete('/end-share/:code', jwtAuthMiddleware, fileShareController.endShar
 
 // Delete Bucket
 router.delete('/:bucketId', jwtAuthMiddleware, BucketController.deleteBucket);
+router.delete('/:bucketId/deletefile', jwtAuthMiddleware, BucketController.deleteBucketFile);
 
 module.exports = router;

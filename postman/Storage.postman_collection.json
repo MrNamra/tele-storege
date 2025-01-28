@@ -2,614 +2,463 @@
 	"info": {
 		"_postman_id": "034b9011-6c12-40da-b376-e4607803a0d0",
 		"name": "Storage",
-		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"schema": "https://schema.getpostman.com/json/collection/v2.0.0/collection.json",
 		"_exporter_id": "21173654"
 	},
 	"item": [
 		{
-			"name": "register",
-			"request": {
-				"method": "POST",
-				"header": [],
-				"body": {
-					"mode": "raw",
-					"raw": "{\r\n    \"name\": \"Test User\",\r\n    \"email\": \"test@test.com\",\r\n    \"password\": \"12345678\"\r\n}",
-					"options": {
-						"raw": {
-							"language": "json"
-						}
-					}
-				},
-				"url": {
-					"raw": "{{url}}/users/register",
-					"host": [
-						"{{url}}"
-					],
-					"path": [
-						"users",
-						"register"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "login",
-			"event": [
+			"name": "user",
+			"item": [
 				{
-					"listen": "test",
-					"script": {
-						"exec": [
-							"let responseJson = pm.response.json();\r",
-							"\r",
-							"// Check if token exists in the response\r",
-							"if (responseJson.token) {\r",
-							"    pm.environment.set(\"token\", responseJson.token);\r",
-							"}"
-						],
-						"type": "text/javascript",
-						"packages": {}
-					}
-				}
-			],
-			"request": {
-				"auth": {
-					"type": "noauth"
+					"name": "register",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"name\": \"Test User\",\r\n    \"email\": \"test@test.com\",\r\n    \"password\": \"12345678\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": "{{url}}/users/register"
+					},
+					"response": []
 				},
-				"method": "POST",
-				"header": [],
-				"body": {
-					"mode": "raw",
-					"raw": "{\r\n    \"email\": \"test@test.com\",\r\n    \"password\": \"12345678\"\r\n}",
-					"options": {
-						"raw": {
-							"language": "json"
-						}
-					}
-				},
-				"url": {
-					"raw": "{{url}}/users/login",
-					"host": [
-						"{{url}}"
-					],
-					"path": [
-						"users",
-						"login"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "users dashboard",
-			"request": {
-				"auth": {
-					"type": "bearer",
-					"bearer": [
-						{
-							"key": "token",
-							"value": "{{token}}",
-							"type": "string"
-						}
-					]
-				},
-				"method": "GET",
-				"header": [],
-				"url": {
-					"raw": "{{url}}/users/dashboard",
-					"host": [
-						"{{url}}"
-					],
-					"path": [
-						"users",
-						"dashboard"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "users profile update",
-			"request": {
-				"auth": {
-					"type": "bearer",
-					"bearer": [
-						{
-							"key": "token",
-							"value": "{{token}}",
-							"type": "string"
-						}
-					]
-				},
-				"method": "PUT",
-				"header": [],
-				"body": {
-					"mode": "raw",
-					"raw": "{\r\n    \"email\": \"test@test.com\",\r\n    \"name\": \"new Test\",\r\n    \"password\": \"12345678\",\r\n    \"confirmPassword\": \"12345678\"\r\n}",
-					"options": {
-						"raw": {
-							"language": "json"
-						}
-					}
-				},
-				"url": {
-					"raw": "{{url}}/users/profile",
-					"host": [
-						"{{url}}"
-					],
-					"path": [
-						"users",
-						"profile"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "bucket Create",
-			"request": {
-				"auth": {
-					"type": "bearer",
-					"bearer": [
-						{
-							"key": "token",
-							"value": "{{token}}",
-							"type": "string"
-						}
-					]
-				},
-				"method": "POST",
-				"header": [],
-				"body": {
-					"mode": "raw",
-					"raw": "{\r\n    \"bucketName\" : \"Bucket1\"\r\n}",
-					"options": {
-						"raw": {
-							"language": "json"
-						}
-					}
-				},
-				"url": {
-					"raw": "{{url}}/buckets/create",
-					"host": [
-						"{{url}}"
-					],
-					"path": [
-						"buckets",
-						"create"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "edit bucket",
-			"request": {
-				"auth": {
-					"type": "bearer",
-					"bearer": [
-						{
-							"key": "token",
-							"value": "{{token}}",
-							"type": "string"
-						}
-					]
-				},
-				"method": "PUT",
-				"header": [],
-				"body": {
-					"mode": "raw",
-					"raw": "{\r\n    \"bucketName\":\"NewBucket1\"\r\n}",
-					"options": {
-						"raw": {
-							"language": "json"
-						}
-					}
-				},
-				"url": {
-					"raw": "{{url}}/buckets/edit/678e86f2ae2b9195b1a364a8",
-					"host": [
-						"{{url}}"
-					],
-					"path": [
-						"buckets",
-						"edit",
-						"678e86f2ae2b9195b1a364a8"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "buckets list",
-			"request": {
-				"auth": {
-					"type": "bearer",
-					"bearer": [
-						{
-							"key": "token",
-							"value": "{{token}}",
-							"type": "string"
-						}
-					]
-				},
-				"method": "GET",
-				"header": [],
-				"url": {
-					"raw": "{{url}}/buckets/list",
-					"host": [
-						"{{url}}"
-					],
-					"path": [
-						"buckets",
-						"list"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "show buckdata ",
-			"request": {
-				"auth": {
-					"type": "noauth"
-				},
-				"method": "GET",
-				"header": [],
-				"url": {
-					"raw": "{{url}}/buckets/show/vj4xoh",
-					"host": [
-						"{{url}}"
-					],
-					"path": [
-						"buckets",
-						"show",
-						"vj4xoh"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "show bucket one files",
-			"event": [
 				{
-					"listen": "test",
-					"script": {
-						"exec": [
-							"var template = `\r",
-							"<style type=\"text/css\">\r",
-							"    .tftable {font-size:14px;color:#333333;width:100%;border-width: 1px;border-color: #87ceeb;border-collapse: collapse;}\r",
-							"    .tftable th {font-size:18px;background-color:#87ceeb;border-width: 1px;padding: 8px;border-style: solid;border-color: #87ceeb;text-align:left;}\r",
-							"    .tftable tr {background-color:#ffffff;}\r",
-							"    .tftable td {font-size:14px;border-width: 1px;padding: 8px;border-style: solid;border-color: #87ceeb;}\r",
-							"    .tftable tr:hover {background-color:#e0ffff;}\r",
-							"</style>\r",
-							"\r",
-							"<table class=\"tftable\" border=\"1\">\r",
-							"    <tr>\r",
-							"        <th>Private Key</th>\r",
-							"    </tr>\r",
-							"    <tr>\r",
-							"        <td>{{response}}</td>\r",
-							"    </tr>\r",
-							"</table>\r",
-							"`;\r",
-							"\r",
-							"function constructVisualizerPayload() {\r",
-							"    return {response: pm.response.text()}\r",
-							"}\r",
-							"\r",
-							"pm.visualizer.set(template, constructVisualizerPayload());"
-						],
-						"type": "text/javascript",
-						"packages": {}
-					}
-				}
-			],
-			"request": {
-				"auth": {
-					"type": "noauth"
-				},
-				"method": "GET",
-				"header": [],
-				"url": {
-					"raw": "{{url}}/buckets/show/vj4xoh/BQACAgUAAyEGAASJWDTgAAMZZ46MSaetpLvn5P0_cpNkmBJr57MAAhoUAAK6fHlUGzEso9B-3_42BA",
-					"host": [
-						"{{url}}"
+					"name": "login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson = pm.response.json();\r",
+									"\r",
+									"// Check if token exists in the response\r",
+									"if (responseJson.token) {\r",
+									"    pm.environment.set(\"token\", responseJson.token);\r",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
 					],
-					"path": [
-						"buckets",
-						"show",
-						"vj4xoh",
-						"BQACAgUAAyEGAASJWDTgAAMZZ46MSaetpLvn5P0_cpNkmBJr57MAAhoUAAK6fHlUGzEso9B-3_42BA"
-					]
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"email\": \"test@test.com\",\r\n    \"password\": \"12345678\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": "{{url}}/users/login"
+					},
+					"response": []
+				},
+				{
+					"name": "user profile",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": {
+								"token": "{{token}}"
+							}
+						},
+						"method": "GET",
+						"header": [],
+						"url": "{{url}}/users/profile"
+					},
+					"response": []
+				},
+				{
+					"name": "users profile update",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": {
+								"token": "{{token}}"
+							}
+						},
+						"method": "PUT",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"email\": \"test@test.com\",\r\n    \"name\": \"new Test\",\r\n    \"password\": \"12345678\",\r\n    \"confirmPassword\": \"12345678\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": "{{url}}/users/profile"
+					},
+					"response": []
+				},
+				{
+					"name": "users dashboard",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": {
+								"token": "{{token}}"
+							}
+						},
+						"method": "GET",
+						"header": [],
+						"url": "{{url}}/users/dashboard"
+					},
+					"response": []
 				}
-			},
-			"response": []
+			]
 		},
 		{
-			"name": "share buckets",
-			"request": {
-				"auth": {
-					"type": "bearer",
-					"bearer": [
+			"name": "bucket",
+			"item": [
+				{
+					"name": "share",
+					"item": [
 						{
-							"key": "token",
-							"value": "{{token}}",
-							"type": "string"
-						}
-					]
-				},
-				"method": "POST",
-				"header": [],
-				"body": {
-					"mode": "raw",
-					"raw": "{\r\n    \"bucketId\": \"678e886fe67c26dfbba410d8\",\r\n    \"password\": \"123\"\r\n    // \"expiresAt\" : time to expred\r\n}",
-					"options": {
-						"raw": {
-							"language": "json"
-						}
-					}
-				},
-				"url": {
-					"raw": "{{url}}/buckets/share",
-					"host": [
-						"{{url}}"
-					],
-					"path": [
-						"buckets",
-						"share"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "stop share bucket",
-			"request": {
-				"auth": {
-					"type": "bearer",
-					"bearer": [
-						{
-							"key": "token",
-							"value": "{{token}}",
-							"type": "string"
-						}
-					]
-				},
-				"method": "DELETE",
-				"header": [],
-				"url": {
-					"raw": "{{url}}/buckets/end-share/vj4xoh",
-					"host": [
-						"{{url}}"
-					],
-					"path": [
-						"buckets",
-						"end-share",
-						"vj4xoh"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "bucket delete",
-			"request": {
-				"auth": {
-					"type": "bearer",
-					"bearer": [
-						{
-							"key": "token",
-							"value": "{{token}}",
-							"type": "string"
-						}
-					]
-				},
-				"method": "DELETE",
-				"header": [],
-				"url": {
-					"raw": "{{url}}/buckets/678e86f2ae2b9195b1a364a8",
-					"host": [
-						"{{url}}"
-					],
-					"path": [
-						"buckets",
-						"678e86f2ae2b9195b1a364a8"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "file upload",
-			"request": {
-				"auth": {
-					"type": "bearer",
-					"bearer": [
-						{
-							"key": "token",
-							"value": "{{token}}",
-							"type": "string"
-						}
-					]
-				},
-				"method": "POST",
-				"header": [],
-				"body": {
-					"mode": "formdata",
-					"formdata": [
-						{
-							"key": "bucketId",
-							"value": "678e886fe67c26dfbba410d8",
-							"type": "text"
+							"name": "share buckets",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": {
+										"token": "{{token}}"
+									}
+								},
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\r\n    \"bucketId\": \"6795f2a65776170dfaf107f4\",\r\n    \"password\": \"123\"\r\n    // \"expiresAt\" : time to expred\r\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": "{{url}}/buckets/share"
+							},
+							"response": []
 						},
 						{
-							"key": "files",
-							"type": "file",
-							"src": [
-								"/C:/Users/Admin/Downloads/WhatsApp Image 2025-01-02 at 3.49.10 PM.jpeg",
-								"/C:/Users/Admin/Downloads/WhatsApp Image 2025-01-02 at 3.49.11 PM.jpeg",
-								"/C:/Users/Admin/Downloads/StudentEmail_Application.pdf"
+							"name": "stop share bucket",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": {
+										"token": "{{token}}"
+									}
+								},
+								"method": "DELETE",
+								"header": [],
+								"url": "{{url}}/buckets/end-share/vj4xoh"
+							},
+							"response": []
+						},
+						{
+							"name": "show share bucket",
+							"request": {
+								"auth": {
+									"type": "noauth"
+								},
+								"method": "GET",
+								"header": [],
+								"url": "{{url}}/buckets/show/t0sibv"
+							},
+							"response": []
+						},
+						{
+							"name": "uplaod file on shared bucket",
+							"request": {
+								"auth": {
+									"type": "noauth"
+								},
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "formdata",
+									"formdata": [
+										{
+											"key": "password",
+											"value": "123",
+											"type": "text"
+										},
+										{
+											"key": "files",
+											"type": "file",
+											"src": [
+												"/C:/Users/Admin/Downloads/test-svgrepo-com.svg",
+												"/C:/Users/Admin/Downloads/64px-Test.svg.png",
+												"/C:/Users/Admin/Downloads/file_1.jpeg"
+											]
+										}
+									]
+								},
+								"url": {
+									"raw": "{{url}}/files/t0sibv/upload",
+									"host": [
+										"{{url}}"
+									],
+									"path": [
+										"files",
+										"t0sibv",
+										"upload"
+									],
+									"query": [
+										{
+											"key": "files",
+											"value": null,
+											"disabled": true
+										}
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "show share bucket one files",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"var template = `\r",
+											"<style type=\"text/css\">\r",
+											"    .tftable {font-size:14px;color:#333333;width:100%;border-width: 1px;border-color: #87ceeb;border-collapse: collapse;}\r",
+											"    .tftable th {font-size:18px;background-color:#87ceeb;border-width: 1px;padding: 8px;border-style: solid;border-color: #87ceeb;text-align:left;}\r",
+											"    .tftable tr {background-color:#ffffff;}\r",
+											"    .tftable td {font-size:14px;border-width: 1px;padding: 8px;border-style: solid;border-color: #87ceeb;}\r",
+											"    .tftable tr:hover {background-color:#e0ffff;}\r",
+											"</style>\r",
+											"\r",
+											"<table class=\"tftable\" border=\"1\">\r",
+											"    <tr>\r",
+											"        <th>Private Key</th>\r",
+											"    </tr>\r",
+											"    <tr>\r",
+											"        <td>{{response}}</td>\r",
+											"    </tr>\r",
+											"</table>\r",
+											"`;\r",
+											"\r",
+											"function constructVisualizerPayload() {\r",
+											"    return {response: pm.response.text()}\r",
+											"}\r",
+											"\r",
+											"pm.visualizer.set(template, constructVisualizerPayload());"
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								}
+							],
+							"request": {
+								"auth": {
+									"type": "noauth"
+								},
+								"method": "GET",
+								"header": [],
+								"url": "{{url}}/buckets/show/cnx05o/8"
+							},
+							"response": []
+						}
+					]
+				},
+				{
+					"name": "bucket Create",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": {
+								"token": "{{token}}"
+							}
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"bucketName\" : \"Bucket\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": "{{url}}/buckets/create"
+					},
+					"response": []
+				},
+				{
+					"name": "edit bucket",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": {
+								"token": "{{token}}"
+							}
+						},
+						"method": "PUT",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"bucketName\":\"NewBucket1\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": "{{url}}/buckets/edit/67931d15d68befa97f8e3b74"
+					},
+					"response": []
+				},
+				{
+					"name": "buckets list",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": {
+								"token": "{{token}}"
+							}
+						},
+						"method": "GET",
+						"header": [],
+						"url": "{{url}}/buckets/list"
+					},
+					"response": []
+				},
+				{
+					"name": "show buckdata to owner",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": {
+								"token": "{{token}}"
+							}
+						},
+						"method": "GET",
+						"header": [],
+						"url": "{{url}}/buckets/display/6795f2a65776170dfaf107f4"
+					},
+					"response": []
+				},
+				{
+					"name": "show bucket single file to bucket owner",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": {
+								"token": "{{token}}"
+							}
+						},
+						"method": "GET",
+						"header": [],
+						"url": "{{url}}/buckets/display/6795f2a65776170dfaf107f4/8"
+					},
+					"response": []
+				},
+				{
+					"name": "bucket delete",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": {
+								"token": "{{token}}"
+							}
+						},
+						"method": "DELETE",
+						"header": [],
+						"url": "{{url}}/buckets/6795be6be43635d37dd25b4d"
+					},
+					"response": []
+				},
+				{
+					"name": "delete files from bucket",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": {
+								"token": "{{token}}"
+							}
+						},
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{url}}/files/6795f2a65776170dfaf107f4?fileId=[3]",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"files",
+								"6795f2a65776170dfaf107f4"
+							],
+							"query": [
+								{
+									"key": "fileId",
+									"value": "[3]"
+								}
 							]
 						}
-					]
+					},
+					"response": []
 				},
-				"url": {
-					"raw": "{{url}}/files/upload",
-					"host": [
-						"{{url}}"
-					],
-					"path": [
-						"files",
-						"upload"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "uplaod file on shared bucket",
-			"request": {
-				"auth": {
-					"type": "noauth"
-				},
-				"method": "POST",
-				"header": [],
-				"body": {
-					"mode": "formdata",
-					"formdata": [
-						{
-							"key": "password",
-							"value": "123",
-							"type": "text"
+				{
+					"name": "show owner bucket file",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": {
+								"token": "{{token}}"
+							}
 						},
-						{
-							"key": "file",
-							"type": "file",
-							"src": "/C:/Users/Admin/Downloads/StudentEmail_Application.pdf"
-						}
-					]
+						"method": "GET",
+						"header": [],
+						"url": "{{url}}/buckets/display/6795f2a65776170dfaf107f4/5"
+					},
+					"response": []
 				},
-				"url": {
-					"raw": "{{url}}/files/r7w3pm/upload",
-					"host": [
-						"{{url}}"
-					],
-					"path": [
-						"files",
-						"r7w3pm",
-						"upload"
-					]
+				{
+					"name": "bucket owner file upload",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": {
+								"token": "{{token}}"
+							}
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "bucketId",
+									"value": "678e886fe67c26dfbba410d8",
+									"type": "text"
+								},
+								{
+									"key": "files",
+									"type": "file",
+									"src": "/C:/Users/Admin/Downloads/test-svgrepo-com.svg"
+								}
+							]
+						},
+						"url": "{{url}}/files/upload"
+					},
+					"response": []
 				}
-			},
-			"response": []
-		},
-		{
-			"name": "display Thumbnail",
-			"request": {
-				"auth": {
-					"type": "noauth"
-				},
-				"method": "GET",
-				"header": [],
-				"url": {
-					"raw": "{{url}}/thumbnail/BQACAgUAAyEGAASMEZsnAAMDZ4_wUgXXaojRXIWVhrVy7OBLBRYAAnEUAAKsq4BU81BKym2vElI2BA",
-					"host": [
-						"{{url}}"
-					],
-					"path": [
-						"thumbnail",
-						"BQACAgUAAyEGAASMEZsnAAMDZ4_wUgXXaojRXIWVhrVy7OBLBRYAAnEUAAKsq4BU81BKym2vElI2BA"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "show bucket single file to bucket owner",
-			"request": {
-				"auth": {
-					"type": "bearer",
-					"bearer": [
-						{
-							"key": "token",
-							"value": "{{token}}",
-							"type": "string"
-						}
-					]
-				},
-				"method": "GET",
-				"header": [],
-				"url": {
-					"raw": "{{url}}/files/BQACAgUAAyEGAASMEZsnAAMDZ4_wUgXXaojRXIWVhrVy7OBLBRYAAnEUAAKsq4BU81BKym2vElI2BA",
-					"host": [
-						"{{url}}"
-					],
-					"path": [
-						"files",
-						"BQACAgUAAyEGAASMEZsnAAMDZ4_wUgXXaojRXIWVhrVy7OBLBRYAAnEUAAKsq4BU81BKym2vElI2BA"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "delete File from bucket",
-			"request": {
-				"auth": {
-					"type": "bearer",
-					"bearer": [
-						{
-							"key": "token",
-							"value": "{{token}}",
-							"type": "string"
-						}
-					]
-				},
-				"method": "DELETE",
-				"header": [],
-				"url": {
-					"raw": "{{url}}/files/678ff05a0da39f176b93bd5e",
-					"host": [
-						"{{url}}"
-					],
-					"path": [
-						"files",
-						"678ff05a0da39f176b93bd5e"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "user profile",
-			"request": {
-				"auth": {
-					"type": "bearer",
-					"bearer": [
-						{
-							"key": "token",
-							"value": "{{token}}",
-							"type": "string"
-						}
-					]
-				},
-				"method": "GET",
-				"header": [],
-				"url": {
-					"raw": "{{url}}/users/profile",
-					"host": [
-						"{{url}}"
-					],
-					"path": [
-						"users",
-						"profile"
-					]
-				}
-			},
-			"response": []
+			]
 		}
 	],
 	"variable": [

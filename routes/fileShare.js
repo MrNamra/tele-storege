@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const router = express.Router();
 const fileShareController = require('../controller/FileShareController');
+const bucketController = require('../controller/BucketController');
 const { jwtAuthMiddleware } = require('../middleware/AuthMiddleware');
 
 // Set up multer to handle file uploads (in memory storage)
@@ -17,7 +18,7 @@ router.post('/:code/upload', upload, fileShareController.uploadFileByCode);
 router.get('/:fileId', jwtAuthMiddleware, fileShareController.accessFile);
 
 // delete upload file route
-router.delete('/:fileId', jwtAuthMiddleware, fileShareController.deleteUploadFile);
+router.delete('/:bucketId', jwtAuthMiddleware, bucketController.deleteBucketFile);
 
 module.exports = router;
     
