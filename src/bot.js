@@ -88,16 +88,16 @@ const handleFileUpload = async (fileBuffer, bucketId, fileName, groupId, accessH
     const fileIdToGetUrl = message.media.document.id;
     const accesshash = message.media.document.accessHash;
 
-    const fileResponse = await client.invoke(
-      new Api.upload.GetFile({
-        location: new Api.InputDocumentFileLocation({
-          id: fileIdToGetUrl,
-          accessHash: BigInt(accesshash),
-        }),
-        offset: 0,
-        limit: 1,
-      })
-    );
+    // const fileResponse = await client.invoke(
+    //   new Api.upload.GetFile({
+    //     location: new Api.InputDocumentFileLocation({
+    //       id: fileIdToGetUrl,
+    //       accessHash: BigInt(accesshash),
+    //     }),
+    //     offset: 0,
+    //     limit: 1,
+    //   })
+    // );
 
     // Get file type, fallback to a default MIME type
     const fileType = message.media.document.mimeType || "application/octet-stream";
