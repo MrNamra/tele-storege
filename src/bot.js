@@ -1,6 +1,8 @@
 const { Api, TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
 const sharp = require("sharp");
+const fs = require("fs");
+const path = require('path');
 require("dotenv").config();
 
 const apiId = Number(process.env.API_ID);
@@ -40,23 +42,37 @@ const handleFileUpload = async (fileBuffer, bucketId, fileName, groupId, accessH
 
     let inputFile;
 
+    // Generate a unique filename for the temporary file (based on timestamp or random string)
+    const tempFileName = `${Date.now()}-${Math.floor(Math.random() * 10000)}-${fileName}`;
+    const tempFilePath = path.join(__dirname, 'tmp', tempFileName);
+
     if (isImage && fileSize <= 10 * 1024 * 1024) {
-      const processedImage = await sharp(fileBuffer).jpeg().toBuffer();
-      
-      inputFile = await client.uploadFile({
-        file: processedImage,
-        fileName,
+      // Process the image buffer to ensure alpha channel (if needed)
+      fileBuffer = await sharp(fileBuffer).ensureAlpha().toBuffer();
+
+      const { format } = await sharp(fileBuffer).metadata();
+      const mimeType = `image/${format}`;
+
+      // Save buffer to a temporary file to provide file name properly
+      fs.writeFileSync(tempFilePath, fileBuffer);
+
+      inputFile = await client.sendFile(peer, {
+        file: tempFilePath,
+        fileName, // Ensure that fileName is correctly passed
+        mimeType, // Explicitly set the mimeType
         workers: 1,
       });
 
-      const message = await client.sendMessage(peer, {
-        message: `Image from bucket ${bucketId}`,
-        file: inputFile,
-      });
+      fs.unlinkSync(tempFilePath);
+
+      const fileId = inputFile.photo.id.toString();
+
+      // Clean up the temporary file after sending the message
+      fs.unlinkSync(tempFilePath);
 
       return {
         success: true,
-        fileId: message.media.photo.id.toString(),
+        fileId,
         fileName,
         fileType: "image",
         bucketId,
@@ -64,6 +80,7 @@ const handleFileUpload = async (fileBuffer, bucketId, fileName, groupId, accessH
       };
 
     } else {
+      // Handle large files (split into parts)
       const partSize = 512 * 1024;
       const totalParts = Math.ceil(fileSize / partSize);
       const fileId = BigInt(Math.floor(Math.random() * -Math.pow(2, 32)));
@@ -93,6 +110,11 @@ const handleFileUpload = async (fileBuffer, bucketId, fileName, groupId, accessH
         message: `File from bucket ${bucketId}`,
         file: inputFile,
       });
+
+      // Ensure no double upload occurs
+      if (!message || !message.media || !message.media.document || !message.media.document.id) {
+        throw new Error("Failed to retrieve file ID from the message.");
+      }
 
       return {
         success: true,

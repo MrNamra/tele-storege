@@ -15,7 +15,18 @@ const app = express();
 
 // Body parser middleware
 app.use(express.json());
-app.use(cors({ origin: '*' }));
+app.use(cors({
+    origin: '*', // Change to specific origins if needed
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true, // If you use cookies or sessions
+    preflightContinue: true, // Handle preflight requests
+}));
+// Referrer policy middleware
+app.use((req, res, next) => {
+    res.setHeader('Referrer-Policy', 'no-referrer'); // or another policy if necessary
+    next();
+});
 
 // app.use(express.static(path.join(__dirname, 'public')));
 

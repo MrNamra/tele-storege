@@ -105,8 +105,6 @@ const uploadFile = async (req, res) => {
             totalAddedSize += fileSizeInMB;
 
             const uploadResult = await handleFileUpload(buffer, bucketId, originalname, bucket.groupId, bucket.accessHash, userId);
-            console.log("---------------uploadResult---------------");
-            console.log(uploadResult);
             uploadResults.push(uploadResult);
         }
 

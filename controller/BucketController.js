@@ -249,30 +249,48 @@ module.exports = {
 
             // Extract file data from messages
             const bucketData = messages.messages
-                .filter(msg => msg.media && msg.media.document) // Ensure message contains a file
+                .filter(msg => msg.media && (msg.media.document || msg.media.photo))
                 .map(msg => {
-                    const document = msg.media.document;
+                    if (msg.media.document) {
+                        const document = msg.media.document;
+                        const fileNameAttr = (document.attributes) ? document.attributes.find(attr => attr.className === "DocumentAttributeFilename") : document;
 
-                    // Extract file name correctly
-                    const fileNameAttr = document.attributes.find(attr => attr.className === "DocumentAttributeFilename");
+                        const thumbnail = document.thumbs?.find(t => t.type === 'm') || null;
 
-                    return {
-                        fileId: msg.id,
-                        fileName: fileNameAttr ? fileNameAttr.fileName : "Unknown",
-                        fileSize: document.size,
-                        mimeType: document.mimeType,
-                        date: msg.date
-                    };
+                        return {
+                            fileId: msg.id,
+                            fileName: fileNameAttr ? fileNameAttr.fileName : "Unknown",
+                            fileSize: document.size || "Unknown",
+                            mimeType: document.mimeType,
+                            thumbnail: thumbnail ? `data:image/jpeg;base64,${thumbnail.bytes.toString('base64')}` : null, // Convert thumbnail to base64
+                            date: msg.date
+                        };
+                    } else if (msg.media.photo) {
+                        const photo = msg.media.photo;
+                        const largestSize = photo.sizes
+                            .filter(size => size.size)
+                            .sort((a, b) => b.size - a.size)[0];
+
+                        const thumbnail = photo.sizes.find(size => size.className === "PhotoStrippedSize") || null;
+
+                        return {
+                            fileId: msg.id,
+                            fileName: `photo_${msg.id}.jpg`,
+                            fileSize: largestSize?.size || "Unknown",
+                            mimeType: "image/jpeg",
+                            thumbnail: thumbnail ? `data:image/jpeg;base64,${thumbnail.bytes.toString('base64')}` : null,
+                            date: msg.date
+                        };
+                    }
                 });
 
-            // Get the total number of messages in the group
             const totalFilesResponse = await client.invoke(
                 new Api.messages.GetHistory({
                     peer: new Api.InputPeerChannel({
                         channelId: Number(groupId),
                         accessHash: BigInt(bucket.accessHash),
                     }),
-                    limit: 1, // Just get the latest message
+                    limit: 1,
                     addOffset: 0,
                 })
             );
@@ -333,21 +351,21 @@ module.exports = {
             }));
 
             let message = messages.messages.find(msg => msg.id == fileId);
-            if (!message || !message.media || !message.media.document) {
+            if (!message || !message.media || (!message.media.document && !message.media.photo)) {
                 console.error(`File not found or no document found for fileId: ${fileId}`);
                 return res.status(404).json({ status: false, message: "File not found in Server Bucket!" });
             }
 
-            const document = message.media.document;
+            const document = (message.media.document) ? message.media.document : message.media.photo;
             console.log("Document retrieved: ", document);
 
             const fileReference = document.fileReference || Buffer.alloc(0); // Default to an empty buffer if undefined
             const thumbSize = document.thumbs && document.thumbs[0] ? document.thumbs[0].type : ""; // Use an empty string if no thumbs
 
             // Extract file name from document attributes
-            const fileNameAttr = document.attributes.find(attr => attr._ === "DocumentAttributeFilename");
+            const fileNameAttr = (document.attributes) ? document.attributes.find(attr => attr._ === "DocumentAttributeFilename") : document;
             const fileName = fileNameAttr ? fileNameAttr.file_name : "unknown_file";
-            const fileMimeType = document.mimeType;
+            const fileMimeType = (document.mimeType) ? document.mimeType : "image/jpeg";
 
             console.log(`File name: ${fileName}, Mime type: ${fileMimeType}`);
 
@@ -395,8 +413,6 @@ module.exports = {
 
                         const newDocument = message.media.document;
                         const newFileReference = newDocument.fileReference || Buffer.alloc(0);
-                        console.log("newDocument")
-                        console.log(newFileReference)
                         const newLocation = new Api.InputDocumentFileLocation({
                             id: newDocument.id,
                             accessHash: newDocument.accessHash,
@@ -451,9 +467,9 @@ module.exports = {
     deleteBucketFile: async (req, res) => {
         try {
             const userId = req.user.id
-            const { bucketId, fileId } = req.params;
+            const { bucketId } = req.params;
+            const { fileId } = req.query;
             const bucket = await Bucket.findOne({ _id: bucketId, userId: userId});
-
             if (!fileId || fileId.length < 1) return res.status(404).json({ status: false, message: "File ID Not Found!" })
             if (!bucket) return res.status(404).json({ status: false, message: "Data Not Found!" })
 
@@ -491,8 +507,7 @@ module.exports = {
                 }
             }
 
-            let filesToDelete = Array.isArray(fileId) ? fileId.map(id => Number(id)) : [Number(fileId)];
-            let messagesToDelete = allMessages.filter(msg => filesToDelete.includes(msg.id));
+            let messagesToDelete = allMessages.filter(msg => fileId.includes(msg.id));
 
             if (messagesToDelete.length === 0) return res.status(404).json({ status: false, message: "No matching files found!" });
 

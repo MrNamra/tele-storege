@@ -22,12 +22,10 @@ async function uploadLargeFile(filePath, chatId) {
         const fileStat = fs.statSync(filePath);
         console.log(`📂 Uploading file: ${filePath} (${(fileStat.size / 1024 / 1024).toFixed(2)} MB)`);
 
-        await client.connect(); // Ensure Telegram client is connected
+        await client.connect();
 
-        // Get the entity (user/group/channel) associated with chatId
-        const entity = await client.getEntity(chatId); // Resolving entity from chatId
+        const entity = await client.getEntity(chatId);
 
-        // Upload file and get a file handle
         const uploadedFile = await client.uploadFile({
             file: filePath,
             workers: 5,
@@ -38,9 +36,8 @@ async function uploadLargeFile(filePath, chatId) {
 
         console.log("✅ File uploaded successfully!");
 
-        // Send the uploaded file using the returned handle
         await client.sendFile(entity, {
-            file: uploadedFile, // Use the file handle returned by uploadFile
+            file: uploadedFile,
             caption: "Here is your file:"
         });
 

@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 const validator = require('validator');
 
 const register = async (req, res) => {
+    console.log("UserController/register: ", req.body)
     let { name, email, password } = req.body;
 
     // sanitize the input
@@ -27,6 +28,7 @@ const register = async (req, res) => {
         await newUser.save();
         res.status(201).json({ status: true, message: 'User registered successfully' });
     } catch (error) {
+        console.log("UserController/register: ", error)
         res.status(500).json({ status: false, message: 'Server Error', error });
     }
 };
@@ -34,8 +36,8 @@ const register = async (req, res) => {
 const login = async (req, res) => {
     const { email, password } = req.body;
 
-    if (email && !validator.isEmail(email)) return res.status(400).json({ status: false, message: 'Invalid email!' });
-    if (password && password.length < 8) return res.status(400).json({ status: false, message: 'Password must be at least 8 characters long' });
+    if (!email || (email && !validator.isEmail(email))) return res.status(400).json({ status: false, message: 'Invalid email!' });
+    if (!password || (password && password.length < 8)) return res.status(400).json({ status: false, message: 'Password must be at least 8 characters long' });
 
     try {
         const user = await User.findOne({ email });
@@ -49,6 +51,7 @@ const login = async (req, res) => {
         });
         res.status(200).json({ status: true, message: 'Login successful', token });
     } catch (error) {
+        console.log("UserController/login: ", error)
         res.status(500).json({ status: false, message: 'Server Error', error });
     }
 };
@@ -58,6 +61,7 @@ const profile = async (req, res) => {
         const user = await User.findOne({ _id: req.user.id }, { _id: 0, password: 0, __v: 0, role: 0, createdAt: 0 });
         res.status(200).json({ status: true, message: 'Profile fetched successfully', user });
     } catch (error) {
+        console.log("UserController/profile: ", error)
         res.status(500).json({ status: false, message: 'Server Error', error });
     }
 };
