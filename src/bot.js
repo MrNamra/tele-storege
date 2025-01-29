@@ -1,7 +1,6 @@
 const { Api, TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
-const File = require("../models/File");
-const Bucket = require("../models/Bucket");
+const sharp = require("sharp");
 require("dotenv").config();
 
 const apiId = Number(process.env.API_ID);
@@ -31,98 +30,79 @@ const handleFileUpload = async (fileBuffer, bucketId, fileName, groupId, accessH
       throw new Error("Invalid file buffer");
     }
 
-    // Create a valid InputPeerChannel object
     const peer = new Api.InputPeerChannel({
       channelId: Number(groupId),
       accessHash: BigInt(accessHash),
     });
 
-    // Fetch group details
-    const channelResponse = await client.invoke(new Api.channels.GetChannels({ id: [peer] }));
-
-    // Validate group response
-    const channel = channelResponse.chats && channelResponse.chats[0];
-    if (!channel || !channel.id || !channel.accessHash) {
-      throw new Error("Could not find the specified group/channel");
-    }
-
     const fileSize = fileBuffer.length;
-    const partSize = 512 * 1024; // 512KB per part
-    const totalParts = Math.ceil(fileSize / partSize);
-    const fileId = BigInt(Math.floor(Math.random() * -Math.pow(2, 32))); // Random file ID
+    const isImage = fileName.match(/\.(jpg|jpeg|png|webp|gif|svg)$/i);
 
-    for (let part = 0; part < totalParts; part++) {
-      const start = part * partSize;
-      const end = Math.min(start + partSize, fileSize);
-      const fileChunk = fileBuffer.slice(start, end);
+    let inputFile;
 
-      await client.invoke(
-        new Api.upload.SaveBigFilePart({
-          fileId: fileId,
-          filePart: part,
-          fileTotalParts: totalParts,
-          bytes: fileChunk,
-        })
-      );
+    if (isImage && fileSize <= 10 * 1024 * 1024) {
+      const processedImage = await sharp(fileBuffer).jpeg().toBuffer();
+      
+      inputFile = await client.uploadFile({
+        file: processedImage,
+        fileName,
+        workers: 1,
+      });
+
+      const message = await client.sendMessage(peer, {
+        message: `Image from bucket ${bucketId}`,
+        file: inputFile,
+      });
+
+      return {
+        success: true,
+        fileId: message.media.photo.id.toString(),
+        fileName,
+        fileType: "image",
+        bucketId,
+        userId,
+      };
+
+    } else {
+      const partSize = 512 * 1024;
+      const totalParts = Math.ceil(fileSize / partSize);
+      const fileId = BigInt(Math.floor(Math.random() * -Math.pow(2, 32)));
+
+      for (let part = 0; part < totalParts; part++) {
+        const start = part * partSize;
+        const end = Math.min(start + partSize, fileSize);
+        const fileChunk = fileBuffer.slice(start, end);
+
+        await client.invoke(
+          new Api.upload.SaveBigFilePart({
+            fileId: fileId,
+            filePart: part,
+            fileTotalParts: totalParts,
+            bytes: fileChunk,
+          })
+        );
+      }
+
+      inputFile = new Api.InputFileBig({
+        id: fileId,
+        parts: totalParts,
+        name: fileName,
+      });
+
+      const message = await client.sendMessage(peer, {
+        message: `File from bucket ${bucketId}`,
+        file: inputFile,
+      });
+
+      return {
+        success: true,
+        fileId: message.media.document.id.toString(),
+        fileName,
+        fileType: message.media.document.mimeType || "application/octet-stream",
+        bucketId,
+        userId,
+      };
     }
-
-    // Create InputFileBig object
-    const inputFile = new Api.InputFileBig({
-      id: fileId,
-      parts: totalParts,
-      name: fileName,
-    });
-
-    // Send the uploaded file to the group
-    const message = await client.sendMessage(peer, {
-      message: `File from bucket ${bucketId}`,
-      file: inputFile,
-    });
-
-    // Validate response
-    if (!message.media || !message.media.document) {
-      console.error("Telegram response error:", message);
-      throw new Error("Failed to send file message or document is missing.");
-    }
-
-    const fileIdToGetUrl = message.media.document.id;
-    const accesshash = message.media.document.accessHash;
-
-    // const fileResponse = await client.invoke(
-    //   new Api.upload.GetFile({
-    //     location: new Api.InputDocumentFileLocation({
-    //       id: fileIdToGetUrl,
-    //       accessHash: BigInt(accesshash),
-    //     }),
-    //     offset: 0,
-    //     limit: 1,
-    //   })
-    // );
-
-    // Get file type, fallback to a default MIME type
-    const fileType = message.media.document.mimeType || "application/octet-stream";
-
-    // Save file information in the database
-    // const newFile = new File({
-    //   fileId: message.media.document.id.toString(),
-    //   fileName,
-    //   fileUrl: null,
-    //   messageId: message.id,
-    //   fileType,
-    //   bucketId,
-    //   userId,
-    // });
-
-    // await newFile.save();
-
-    return {
-      success: true,
-      fileId: message.media.document.id.toString(),
-      fileName,
-      fileType,
-      bucketId,
-      userId,
-    };
   } catch (error) {
     console.error("Error during file upload:", error);
     throw error;
