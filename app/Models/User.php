@@ -55,8 +55,13 @@ class User extends Authenticatable
         ];
     }
 
-    public function setBucketCountAttribute()
+    public function getbucketCountAttribute()
     {
-        return 0;
+        return $this->hasMany(Bucket::class)->count();
+    }
+
+    public function Bucket()
+    {
+        return $this->hasMany(Bucket::class)->select(['id', 'bucketName']) ?? [];
     }
 }

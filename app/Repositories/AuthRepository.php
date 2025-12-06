@@ -36,4 +36,30 @@ class AuthRepository implements AuthRepositoryInterface
         ]);
         return ['message' => 'User Created successfully!'];
     }
+
+    public function profile(): array
+    {
+        return Auth::user()->only(['id', 'name', 'email', 'bucketAllowed']);
+    }
+
+    public function updateProfile(array $data): void
+    {
+        User::update([
+            'id' => Auth::id()
+        ],
+        [
+            'name'=> $data['name'],
+            'email'=> $data['email'],
+            'password'=> bcrypt($data['password']),
+        ]);
+    }
+
+    public function dashboard(): array
+    {
+        return [
+            'user' => $this->profile(),
+            'bucket' => Auth::user()->bucket,
+            'totalBuckets' => Auth::user()->bucketCount,
+        ];
+    }
 }

@@ -7,6 +7,7 @@ use App\Http\Requests\LoginRequest;
 use App\Http\Requests\RegisterRequest;
 use App\Interfaces\AuthRepositoryInterface;
 use App\Trait\ApiResponseTrait;
+use Exception;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
 class AuthController extends Controller
@@ -28,7 +29,7 @@ class AuthController extends Controller
             return $this->errorResponse(message: $e->getMessage());
         }
     }
-    public function login(LoginRequest $request)
+    public function login(LoginRequest $request): JsonResponse
     {
         try {
             $response = $this->authRepo->login(email: $request->email, password: $request->password);
@@ -36,6 +37,33 @@ class AuthController extends Controller
                 $this->successResponse(data: $response['data'] ?? [], message: $response['message']) :
                 $this->errorResponse(message: $response['message'], status: 422);
         } catch (\Exception $e) {
+            return $this->errorResponse(message: $e->getMessage());
+        }
+    }
+    public function profile(): JsonResponse
+    {
+        try {
+            $data = $this->authRepo->profile();
+            return $this->successResponse(data: $data);
+        } catch (Exception $e) {
+            return $this->errorResponse(message: $e->getMessage());
+        }
+    }
+    public function updateProfile(RegisterRequest $request): JsonResponse
+    {
+        try {
+            $this->authRepo->updateProfile($request->all());
+            return $this->successResponse(message: 'Profile Updated Successful');
+        } catch (Exception $e) {
+            return $this->errorResponse(message: $e->getMessage());
+        }
+    }
+    public function dashboard(): JsonResponse
+    {
+        try {
+            $data = $this->authRepo->dashboard();
+            return $this->successResponse(data: $data);
+        } catch (Exception $e) {
             return $this->errorResponse(message: $e->getMessage());
         }
     }
