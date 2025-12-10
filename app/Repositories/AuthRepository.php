@@ -16,7 +16,7 @@ class AuthRepository implements AuthRepositoryInterface
             $token = $user->createToken('AppToken')->plainTextToken;
             return [
                 'data' => [
-                    'token'=> $token,
+                    'token' => $token,
                 ],
                 'message' => 'Login Successful!'
             ];
@@ -44,14 +44,16 @@ class AuthRepository implements AuthRepositoryInterface
 
     public function updateProfile(array $data): void
     {
-        User::update([
+        User::update(
+            [
             'id' => Auth::id()
         ],
-        [
-            'name'=> $data['name'],
-            'email'=> $data['email'],
-            'password'=> bcrypt($data['password']),
-        ]);
+            [
+            'name' => $data['name'],
+            'email' => $data['email'],
+            'password' => bcrypt($data['password']),
+        ]
+        );
     }
 
     public function dashboard(): array

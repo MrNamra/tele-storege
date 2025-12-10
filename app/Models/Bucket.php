@@ -8,7 +8,9 @@ class Bucket extends Model
 {
     protected $fillable = [
         "user_id",
-        "bucketName"
+        "bucketName",
+        "channel_id",
+        "access_hash"
     ];
 
     public function user()
