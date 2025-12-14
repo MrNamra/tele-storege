@@ -4,9 +4,11 @@ namespace App\Repositories;
 
 use App\Interfaces\BucketRepositoryInterface;
 use App\Models\Bucket;
+use App\Models\BucketShare;
 use App\Services\Telegram\TelegramClient;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 
 class BucketRepository implements BucketRepositoryInterface
 {
@@ -68,5 +70,31 @@ class BucketRepository implements BucketRepositoryInterface
     public function listBuckets(): Collection
     {
         return Bucket::select(['id', 'bucketName'])->where('user_id', Auth::id())->get();
+    }
+
+    public function shareBucket($request): BucketShare
+    {
+        $bucket = Bucket::firstWhere(['id' => $request['bucket_id'], 'user_id' => Auth::id()]);
+        if(!$bucket) {
+            abort(404);
+        }
+
+        $sharedBucket = BucketShare::firstWhere(['bucket_id' => $bucket['id']]);
+
+        if(!$sharedBucket) {
+            $sharedBucket = BucketShare::create([
+                'bucket_id' => $bucket['id'],
+                'password' => $request['password'] ?? null,
+                'code' => Str::random(5)
+            ]);
+        }
+        return $sharedBucket;
+    }
+    public function endShare($code): void
+    {
+        BucketShare::whereCode($code)
+        ->whereHas('bucket', fn ($q) => $q->whereUserId(Auth::id()))
+        ->with('bucket')
+        ->delete();
     }
 }

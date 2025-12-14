@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use danog\MadelineProto\API;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\URL;
 
 class TelegramClient
 {
@@ -138,28 +139,43 @@ class TelegramClient
         // Upload file to Telegram
         $inputFile = $this->client()->upload($file->getRealPath(), $originalName);
 
-        $mimeType = $file->getMimeType();
+        $mimeType = $file->getMimeType() ?? 'application/octet-stream';
 
+        $attributes = [
+            [
+                '_' => 'documentAttributeFilename',
+                'file_name' => $originalName
+            ]
+        ];
         if (str_starts_with($mimeType, 'image/')) {
-            $media = [
-                '_' => 'inputMediaUploadedPhoto',
-                'file' => $inputFile,
-            ];
-        } else {
-            $media = [
-                '_' => 'inputMediaUploadedDocument',
-                'file' => $inputFile,
-                'mime_type' => $mimeType,
-                'attributes' => [
-                    ['_' => 'documentAttributeFilename', 'file_name' => $originalName]
-                ]
-            ];
+            if ($size = @getimagesize($file->getRealPath())) {
+                [$w, $h] = getimagesize($file->getRealPath());
+                $attributes[] = [
+                    '_' => 'documentAttributeImageSize',
+                    'w' => $w,
+                    'h' => $h
+                ];
+            }
         }
-
+        // else {
+        //     $media = [
+        //         '_' => 'inputMediaUploadedDocument',
+        //         'file' => $inputFile,
+        //         'mime_type' => $mimeType,
+        //         'attributes' => [
+        //             ['_' => 'documentAttributeFilename', 'file_name' => $originalName]
+        //         ]
+        //     ];
+        // }
 
         return $this->client()->messages->sendMedia(
             peer: $channelId,
-            media: $media
+             media: [
+                '_' => 'inputMediaUploadedDocument',
+                'file' => $inputFile,
+                'mime_type' => $mimeType,
+                'attributes' => $attributes
+            ]
         );
     }
     public function getChannelFiles(string $channelId, string $bucket_id, int $page = 1, int $perPage = 20)
@@ -178,15 +194,14 @@ class TelegramClient
             $media = $msg['media'];
 
             $file = [
-                'msg_id'     => encryptId($msg['id']),
+                'msg_id'     => encrypt($msg['id']),
                 'date'       => $msg['date'],
                 'type'       => null,
                 'file_name'  => null,
                 'mime_type'  => null,
                 'size'       => null,
-                // 'thumbnail'  => route('thumbnail', ['channel' => $channelId, 'id' => $msg['id']]),
-                'thumbnail'  => route('thumbnail', ['bucket' => encryptId($bucket_id), 'id' => encryptId($msg['id'])]),
-                // 'download'   => route('tg.stream', ['channel' => $channelId, 'id' => $msg['id']]),
+                'thumbnail'  => URL::temporarySignedRoute('thumbnail', now()->addMinutes(5), ['bucket' => $bucket_id, 'id' => encrypt($msg['id'])]),
+                // 'thumbnail'  => route('thumbnail', ['bucket' => $bucket_id, 'id' => encryptId($msg['id'])]),
             ];
 
             /** PHOTO */
@@ -219,7 +234,48 @@ class TelegramClient
 
         return ['data' => $files];
     }
+    public function getFileMeta(int|string $channelId, int $msgId): array
+    {
+        $result = $this->client()->messages->getHistory(
+            peer: $channelId,
+            offset_id: $msgId + 1,
+            limit: 1
+        );
 
+        $message = $result['messages'][0] ?? null;
+
+        if (!$message || empty($message['media'])) {
+            throw new \Exception('No media found');
+        }
+
+        $media = $message['media'];
+
+        if (isset($media['photo'])) {
+            return [
+                'mime'     => 'image/jpeg',
+                'filename' => 'image.jpg',
+                'media'    => $media,
+            ];
+        }
+
+        if (isset($media['document'])) {
+            $filename = 'file';
+
+            foreach ($media['document']['attributes'] as $attr) {
+                if ($attr['_'] === 'documentAttributeFilename') {
+                    $filename = $attr['file_name'];
+                }
+            }
+
+            return [
+                'mime'     => $media['document']['mime_type'] ?? 'application/octet-stream',
+                'filename' => $filename,
+                'media'    => $media,
+            ];
+        }
+
+        throw new \Exception('Unsupported media');
+    }
     public function streamThumbnailFromTelegram(string $channelId, int $messageId)
     {
         $response = $this->client()->messages->getHistory(
@@ -248,7 +304,7 @@ class TelegramClient
 
     }
 
-    public function streamThumbnail(int $channelId, int $msgId)
+    public function old_streamThumbnail(int $channelId, int $msgId)
     {
         $history = $this->client()->messages->getHistory(
             peer: $channelId,
@@ -300,8 +356,40 @@ class TelegramClient
 
         return response()->file(public_path('fallback/file.jpg'));
     }
-    public function streamFile(string $channelId, int $msgId)
+    public function streamThumbnail(int|string $channelId, int $msgId)
     {
+        $history = $this->client()->messages->getHistory(
+            peer: $channelId,
+            offset_id: $msgId + 1,
+            limit: 1
+        );
+
+        $msg = $history['messages'][0] ?? null;
+        if (!$msg || empty($msg['media']['document']['thumbs'])) {
+            abort(404);
+        }
+
+        $doc   = $msg['media']['document'];
+        // dd($doc);
+        $thumb = pickBestThumb($doc['thumbs']);
+
+        return response()->stream(function () use ($doc, $thumb) {
+            $out = fopen('php://output', 'wb');
+
+            $this->client()->downloadToStream([
+                'document' => $doc,
+                'thumb'    => $thumb
+            ], $out);
+
+            fclose($out);
+        }, 200, [
+            'Content-Type'  => 'image/jpeg',
+            'Cache-Control' => 'public, max-age=86400',
+        ]);
+    }
+    public function streamFile(string $channelId, int $msgId, $stream = null)
+    {
+        /*
         $history = $this->client()->messages->getHistory(
             peer: $channelId,
             offset_id: $msgId,
@@ -319,5 +407,45 @@ class TelegramClient
         }, 200, [
             "Content-Type" => $media['document']['mime_type'] ?? "application/octet-stream"
         ]);
+        */
+        $result = $this->client()->messages->getMessages([
+            'peer' => $channelId,
+            'id'   => [$msgId],
+        ]);
+
+        $message = $result['messages'][0] ?? null;
+
+        if (!$message || empty($message['media'])) {
+            throw new \Exception('No media found');
+        }
+
+        $media = $message['media'];
+
+        // 🔑 Detect mime type
+        if (isset($media['photo'])) {
+            $mime = 'image/jpeg';
+            $filename = 'image.jpg';
+        } elseif (isset($media['document'])) {
+            $mime = $media['document']['mime_type'] ?? 'application/octet-stream';
+            $filename = $media['document']['attributes'][0]['file_name'] ?? 'file';
+        } else {
+            $mime = 'application/octet-stream';
+            $filename = 'file';
+        }
+
+        $this->client()->downloadToStream($media, $stream);
+
+        return compact('mime', 'filename');
+    }
+    public function deleteFiles(int|string $channel_id, $IDs)
+    {
+        $IDs = array_map(fn($id) => decrypt($id), $IDs);
+
+        $this->client()->channels->deleteMessages(
+            channel: $channel_id,
+            id: $IDs
+        );
+
+        return true;
     }
 }

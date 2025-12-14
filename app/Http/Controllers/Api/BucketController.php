@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\BucketRequest;
+use App\Http\Requests\ShareBucketRequest;
 use App\Interfaces\BucketRepositoryInterface;
 use App\Models\Bucket;
 use App\Trait\ApiResponseTrait;
@@ -58,5 +59,46 @@ class BucketController extends Controller
         $data = $this->bucketRepo->listBuckets();
 
         return Self::successResponse(data: $data);
+    }
+    public function showBucketFile(\App\Services\Telegram\TelegramClient $telegram, Bucket $bucket, $id)
+    {
+        try {
+            $msgId = decryptId($id)[0];
+
+            $meta = $telegram->getFileMeta(
+                channelId: $bucket->channel_id,
+                msgId: $msgId
+            );
+
+            return response()->stream(function () use ($telegram, $meta) {
+                $out = fopen('php://output', 'wb');
+                $telegram->client()->downloadToStream($meta['media'], $out);
+                fclose($out);
+            }, 200, [
+                'Content-Type'        => $meta['mime'],
+                'Content-Disposition' => 'inline; filename="'.$meta['filename'].'"',
+                'Accept-Ranges'       => 'bytes',
+            ]);
+        } catch (Exception $e) {
+            abort(404, 'file not found');
+        }
+    }
+    public function shareBucket(ShareBucketRequest $request): JsonResponse
+    {
+        try {
+            $data = $this->bucketRepo->shareBucket($request->only(['bucket_id', 'password', 'expiresAt']));
+            return Self::successResponse(data: ['code' => $data->code], message: 'Bucket Shared Successfully');
+        } catch (Exception $e) {
+            return Self::errorResponse(message: $e->getMessage());
+        }
+    }
+    public function endShare($code): JsonResponse
+    {
+        try {
+            $this->bucketRepo->endShare($code);
+            return Self::successResponse(message: 'Bucket Sharing ended!');
+        } catch (Exception $e) {
+            return Self::errorResponse(message: $e->getMessage());
+        }
     }
 }

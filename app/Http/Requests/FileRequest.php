@@ -2,21 +2,56 @@
 
 namespace App\Http\Requests;
 
+use App\Models\Bucket;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
+use Vinkla\Hashids\Facades\Hashids;
 
 class FileRequest extends FormRequest
 {
+    protected ?Bucket $bucket = null;
     public function authorize(): bool
     {
         return true;
     }
 
+    protected function prepareForValidation()
+    {
+        try {
+            $decoded = Hashids::decode($this->bucket_id);
+
+            if (empty($decoded)) {
+                throw new \Exception();
+            }
+
+            $bucket = Bucket::where('id', $decoded[0])
+                ->where('user_id', auth()->id())
+                ->first();
+
+            if (!$bucket) {
+                throw new \Exception();
+            }
+
+            $this->merge([
+                'bucket_id' => $bucket->id,
+            ]);
+
+            $this->bucket = $bucket;
+
+        } catch (\Throwable $e) {
+            throw new HttpResponseException(
+                response()->json([
+                    'success' => false,
+                    'message' => 'Bucket not found',
+                ], 404)
+            );
+        }
+    }
     public function rules(): array
     {
         return [
-            'bucket_id' => 'required|exists:buckets,id',
+            'bucket_id' => 'required',
             'files' => 'required|array',
             'files.*' => 'required|file|max:2048000',
         ];
@@ -44,5 +79,9 @@ class FileRequest extends FormRequest
                 'error' => $validator->errors(),
             ], 422)
         );
+    }
+    public function bucket(): Bucket
+    {
+        return $this->bucket;
     }
 }

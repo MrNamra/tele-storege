@@ -10,6 +10,8 @@ use App\Trait\ApiResponseTrait;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Services\Telegram\TelegramClient;
+use Exception;
+use Illuminate\Support\Facades\Auth;
 
 class FileController extends Controller
 {
@@ -22,7 +24,7 @@ class FileController extends Controller
     public function uploadFile(FileRequest $request): JsonResponse
     {
         try {
-            $bucket = Bucket::firstWhere(['user_id' => auth()->id(), 'id' => $request->bucket_id]);
+            $bucket = Bucket::firstWhere(['user_id' => auth()->id(), 'id' => decryptId($request->bucket_id)]);
 
             if(!$bucket) {
                 return Self::errorResponse('Bucket not found / Selected');
@@ -60,11 +62,34 @@ class FileController extends Controller
 
     public function thumbnail(TelegramClient $telegram, Bucket $bucket, $id)
     {
-        return $telegram->streamThumbnail(channelId: $bucket->channel_id, msgId: decryptId($id)[0]);
+        return $telegram->streamThumbnail(channelId: $bucket->channel_id, msgId: decrypt($id));
     }
 
     public function stream(TelegramClient $telegram, Bucket $bucket, $id)
     {
         return $telegram->streamFile(channelId: $bucket->channel_id, msgId: $id);
+    }
+
+    public function removeFile(Request $request,Bucket $bucket)
+    {
+        $request->validate([
+            'file_id'=> 'required|array',
+            'file_id.*' => 'required'
+        ]);
+
+        try {
+            if(!$bucket->firstWhere('user_id', Auth::id())) {
+                return Self::errorResponse(message:'Bucket or File not Find');
+            }
+
+            $this->fileRepo->deleteFiles(
+                channel_id: $bucket->channel_id,
+                IDs: $request->file_id
+            );
+
+            return Self::successResponse(message: 'File(s) Delete Successfully');
+        } catch (Exception $e) {
+            return Self::errorResponse(message: $e->getMessage());
+        }
     }
 }
