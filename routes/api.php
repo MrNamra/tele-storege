@@ -2,7 +2,7 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BucketController;
-use App\Http\Controllers\FileController;
+use App\Http\Controllers\Api\FileController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -37,6 +37,5 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
 
 // Route::get('bucket/show/{code}', [BucketController::class,'']);
 // Route::get('bucket/show/{code}/{fileId}', [BucketController::class,'']);
-Route::get('/thumbnail/{bucket}/{messageId}', [FileController::class, 'streamThumb']);
-Route::get('/thumbnail/{id}', [FileController::class, 'thumbnail'])->name('thumbnail');
+Route::get('/thumbnail/{bucket}/{id}', [FileController::class, 'thumbnail'])->name('thumbnail');
 Route::get('/stream/{id}', [FileController::class, 'stream'])->name('stream.file');

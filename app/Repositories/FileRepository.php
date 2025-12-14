@@ -48,7 +48,7 @@ class FileRepository implements FileRepositoryInterface
 
         return $this->telegram->getChannelFiles(
             channelId: $bucket->channel_id,
-            // accessHash: $bucket->access_hash,
+            bucket_id: $bucket->id,
             page: $page,
             perPage: $perPage
         );

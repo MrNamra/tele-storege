@@ -1,7 +1,8 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Controller;
 use App\Http\Requests\FileRequest;
 use App\Interfaces\FileRepositoryInterface;
 use App\Models\Bucket;
@@ -57,13 +58,13 @@ class FileController extends Controller
         }
     }
 
-    public function thumbnail(TelegramClient $telegram, $id)
+    public function thumbnail(TelegramClient $telegram, Bucket $bucket, $id)
     {
-        return $telegram->streamThumbnail($id);
+        return $telegram->streamThumbnail(channelId: $bucket->channel_id, msgId: decryptId($id)[0]);
     }
 
-    public function stream(TelegramClient $telegram, $id)
+    public function stream(TelegramClient $telegram, Bucket $bucket, $id)
     {
-        return $telegram->streamFile($id);
+        return $telegram->streamFile(channelId: $bucket->channel_id, msgId: $id);
     }
 }

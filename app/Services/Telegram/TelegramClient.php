@@ -162,7 +162,7 @@ class TelegramClient
             media: $media
         );
     }
-    public function getChannelFiles(string $channelId, int $page = 1, int $perPage = 20)
+    public function getChannelFiles(string $channelId, string $bucket_id, int $page = 1, int $perPage = 20)
     {
         $history = $this->client()->messages->getHistory(
             peer: $channelId,
@@ -178,14 +178,14 @@ class TelegramClient
             $media = $msg['media'];
 
             $file = [
-                'msg_id'     => $msg['id'],
+                'msg_id'     => encryptId($msg['id']),
                 'date'       => $msg['date'],
                 'type'       => null,
                 'file_name'  => null,
                 'mime_type'  => null,
                 'size'       => null,
                 // 'thumbnail'  => route('thumbnail', ['channel' => $channelId, 'id' => $msg['id']]),
-                'thumbnail'  => route('thumbnail', $msg['id']),
+                'thumbnail'  => route('thumbnail', ['bucket' => encryptId($bucket_id), 'id' => encryptId($msg['id'])]),
                 // 'download'   => route('tg.stream', ['channel' => $channelId, 'id' => $msg['id']]),
             ];
 
@@ -246,15 +246,12 @@ class TelegramClient
             abort(404, "No photo found");
         }
 
-        
-
     }
 
-    public function streamThumbnail(int $msgId)
+    public function streamThumbnail(int $channelId, int $msgId)
     {
         $history = $this->client()->messages->getHistory(
-            // peer: $channelId,
-            peer: -1003431070811,
+            peer: $channelId,
             offset_id: $msgId,
             add_offset: -1,
             limit: 1
@@ -274,12 +271,6 @@ class TelegramClient
                 // $jpegBytes = (string) $sizes[0]['inflated'];
                 $thumb = $sizes[1];
 
-                // return response($jpegBytes, 200, [
-                //     "Content-Type" => "image/jpeg"
-                // ]);
-                // $thumbLocation = $this->client()->getDownloadInfo($sizes[1]);
-                // $stream = fopen('php://output', 'wb');
-                // dd($this->client()->downloadToStream($thumbLocation, $stream));
                 return response()->stream(function () use ($photo) {
                     $stream = fopen('php://output', 'wb');
                     $this->client()->downloadToStream($photo, $stream);
@@ -312,8 +303,7 @@ class TelegramClient
     public function streamFile(string $channelId, int $msgId)
     {
         $history = $this->client()->messages->getHistory(
-            // peer: $channelId,
-            peer: -1003431070811,
+            peer: $channelId,
             offset_id: $msgId,
             add_offset: -1,
             limit: 1
