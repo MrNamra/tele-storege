@@ -24,7 +24,7 @@ class FileController extends Controller
     public function uploadFile(FileRequest $request): JsonResponse
     {
         try {
-            $bucket = Bucket::firstWhere(['user_id' => auth()->id(), 'id' => decryptId($request->bucket_id)]);
+            $bucket = Bucket::firstWhere(['user_id' => auth()->id(), 'id' => $request->bucket_id]);
 
             if(!$bucket) {
                 return Self::errorResponse('Bucket not found / Selected');

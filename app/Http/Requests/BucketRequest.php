@@ -32,7 +32,7 @@ class BucketRequest extends FormRequest
         throw new HttpResponseException(
             response()->json([
                 'success' => false,
-                'message' => 'Validation Fail',
+                'message' => $validator->errors()->first(),
                 'error' => $validator->errors(),
             ], 422)
         );

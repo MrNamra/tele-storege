@@ -19,13 +19,13 @@ class FileRequest extends FormRequest
     protected function prepareForValidation()
     {
         try {
-            $decoded = Hashids::decode($this->bucket_id);
+            // $decoded = Hashids::decode($this->bucket_id);
 
-            if (empty($decoded)) {
-                throw new \Exception();
-            }
+            // if (empty($decoded)) {
+            //     throw new \Exception();
+            // }
 
-            $bucket = Bucket::where('id', $decoded[0])
+            $bucket = Bucket::where('id', $this->bucket_id)
                 ->where('user_id', auth()->id())
                 ->first();
 
@@ -75,7 +75,7 @@ class FileRequest extends FormRequest
         throw new HttpResponseException(
             response()->json([
                 'success' => false,
-                'message' => 'Validation Fail',
+                'message' => $validator->errors()->first(),
                 'error' => $validator->errors(),
             ], 422)
         );

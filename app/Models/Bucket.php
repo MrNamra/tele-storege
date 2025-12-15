@@ -13,7 +13,7 @@ class Bucket extends Model
         "access_hash"
     ];
 
-    // protected $appends = ['enc_id'];
+    protected $appends = ['code'];
 
     // protected $hidden = ['id'];
 
@@ -22,10 +22,16 @@ class Bucket extends Model
         return $this->belongsTo(User::class);
     }
 
-    // public function getEncIdAttribute()
-    // {
-    //     return encryptId($this->id);
-    // }
+
+    public function bucketShare()
+    {
+        return $this->hasOne(BucketShare::class, 'bucket_id', 'id');
+    }
+
+    public function getCodeAttribute()
+    {
+        return $this->bucketShare?->code;
+    }
 
     // public function getPublicIdAttribute()
     // {

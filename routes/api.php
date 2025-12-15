@@ -35,11 +35,11 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
     });
 
 });
-Route::get('/display/{bucket}/{fileId}', [BucketController::class, 'showBucketFile'])->middleware('signed');
+Route::get('/buckets/display/{bucket}/{fileId}', [BucketController::class, 'showBucketFile'])->middleware('signed');
 
 // Route::get('bucket/show/{code}', [BucketController::class,'']);
 // Route::get('bucket/show/{code}/{fileId}', [BucketController::class,'']);
 Route::get('/thumbnail/{bucket}/{id}', [FileController::class, 'thumbnail'])->name('thumbnail')->middleware('signed');
 Route::get('/stream/{id}', [FileController::class, 'stream'])->name('stream.file');
 Route::get('/show/{code}', [SharedBucketController::class, 'index'])->name('shared.bucket-data');
-Route::post('/upload/{code}', [SharedBucketController::class, 'uploadFile'])->name('shared.bucket-data');
+Route::post('files/upload/{code}', [SharedBucketController::class, 'uploadFile'])->name('shared.bucket-data');

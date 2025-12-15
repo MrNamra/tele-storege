@@ -40,7 +40,7 @@ class LoginRequest extends FormRequest
             response()->json([
                 'success' => false,
                 'data'    => [],
-                'message' => $validator->errors(),
+                'message' => $validator->errors()->first(),
             ], 422)
         );
     }

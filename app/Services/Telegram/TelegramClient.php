@@ -232,7 +232,7 @@ class TelegramClient
             }
         }
 
-        return ['data' => $files];
+        return $files;
     }
     public function getFileMeta(int|string $channelId, int $msgId): array
     {
