@@ -35,6 +35,9 @@ class SharedBucketController extends Controller
     {
         try {
             $bucket = BucketShare::firstWhere(["code"=> $code, 'password' => $request->password]);
+            if(!$bucket) {
+                Self::errorResponse(message: 'Passowrd is wrong!');
+            }
             $this->bucket->fileUpload($request->file('files'), $bucket->bucket);
             return Self::successResponse(message: 'File(s) Upload Successfull');
         } catch (Exception $e) {
