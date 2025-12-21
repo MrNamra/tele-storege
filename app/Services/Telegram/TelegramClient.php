@@ -201,6 +201,7 @@ class TelegramClient
                 'mime_type'  => null,
                 'size'       => null,
                 'thumbnail'  => URL::temporarySignedRoute('thumbnail', now()->addMinutes(5), ['bucket' => $bucket_id, 'id' => encrypt($msg['id'])]),
+                'stream_url' => URL::temporarySignedRoute('stream.file.signed', now()->addMinutes(30), ['bucket' => (string)$bucket_id, 'id' => encrypt($msg['id'])]),
                 // 'thumbnail'  => route('thumbnail', ['bucket' => $bucket_id, 'id' => encryptId($msg['id'])]),
             ];
 
@@ -447,5 +448,52 @@ class TelegramClient
         );
 
         return true;
+    }
+    public function downlaodFiles($file = null, $channel_id)
+    {
+
+         $history = $this->client()->messages->getHistory(
+            peer: $channel_id,
+            offset_id: $file + 1,
+            limit: 1
+        );
+
+        $message = $history['messages'][0] ?? null;
+
+        if (!$message || empty($message['media'])) {
+            abort(404, 'File not found');
+        }
+
+        $media = $message['media'];
+
+        // 3️⃣ Detect media type + meta
+        if (isset($media['photo'])) {
+            $mime     = 'image/jpeg';
+            $filename = 'image.jpg';
+        } elseif (isset($media['document'])) {
+            $mime = $media['document']['mime_type'] ?? 'application/octet-stream';
+
+            $filename = 'file';
+            foreach ($media['document']['attributes'] as $attr) {
+                if ($attr['_'] === 'documentAttributeFilename') {
+                    $filename = $attr['file_name'];
+                    break;
+                }
+            }
+        } else {
+            abort(404, 'Unsupported media');
+        }
+
+        // 4️⃣ Stream directly from Telegram
+        return response()->stream(function () use ($media) {
+            $out = fopen('php://output', 'wb');
+            $this->client()->downloadToStream($media, $out);
+            fclose($out);
+        }, 200, [
+            'Content-Type'        => $mime,
+            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+            'Accept-Ranges'       => 'bytes',
+            'Cache-Control'       => 'no-store',
+        ]);
     }
 }

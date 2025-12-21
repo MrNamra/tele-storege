@@ -70,4 +70,9 @@ class FileRepository implements FileRepositoryInterface
         $this->telegram->deleteFiles(channel_id: $channel_id, IDs: $IDs);
         return true;
     }
+
+    public function fileDownlaod($files, $chennel_id)
+    {
+        return $this->telegram->downlaodFiles(decrypt($files), $chennel_id);
+    }
 }

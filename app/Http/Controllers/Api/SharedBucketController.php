@@ -36,10 +36,30 @@ class SharedBucketController extends Controller
         try {
             $bucket = BucketShare::firstWhere(["code"=> $code, 'password' => $request->password]);
             if(!$bucket) {
-                Self::errorResponse(message: 'Passowrd is wrong!');
+                return Self::errorResponse(message: 'Password is wrong!');
             }
             $this->bucket->fileUpload($request->file('files'), $bucket->bucket);
             return Self::successResponse(message: 'File(s) Upload Successfull');
+        } catch (Exception $e) {
+            return Self::errorResponse(message: $e->getMessage());
+        }
+    }
+
+    public function downloadFile(Request $request, $code)
+    {
+        try {
+            $bucketShare = BucketShare::firstWhere(["code"=> $code, 'password' => $request->password]);
+            if(!$bucketShare) {
+                return Self::errorResponse(message: 'Password is wrong!');
+            }
+
+            $bucket = $bucketShare->bucket;
+            if(!$bucket) {
+                return Self::errorResponse(message: 'Bucket not found!');
+            }
+
+            return $this->bucket->fileDownload($request, $bucket->channel_id);
+
         } catch (Exception $e) {
             return Self::errorResponse(message: $e->getMessage());
         }
