@@ -25,7 +25,7 @@ class SharedBucketController extends Controller
         try {
             $bucketShare = BucketShare::firstWhere(["code" => $code]);
             if (!$bucketShare || !$bucketShare->bucket) {
-                return Self::errorResponse(message: 'Shared bucket not found', statusCode: 404);
+                return Self::errorResponse(message: 'Shared bucket not found', status: 404);
             }
 
             $response = $this->bucket->bucketData($request->all(), $bucketShare->bucket);
@@ -40,11 +40,11 @@ class SharedBucketController extends Controller
         try {
             $bucketShare = BucketShare::firstWhere(["code" => $code]);
             if (!$bucketShare || !$bucketShare->bucket) {
-                return Self::errorResponse(message: 'Shared bucket not found', statusCode: 404);
+                return Self::errorResponse(message: 'Shared bucket not found', status: 404);
             }
 
             if (!empty($bucketShare->password) && $bucketShare->password !== $request->password) {
-                return Self::errorResponse(message: 'Password is wrong!', statusCode: 403);
+                return Self::errorResponse(message: 'Password is wrong!', status: 403);
             }
 
             $this->bucket->fileUpload($request->file('files'), $bucketShare->bucket);
@@ -59,21 +59,21 @@ class SharedBucketController extends Controller
         try {
             $bucketShare = BucketShare::firstWhere(["code" => $code]);
             if (!$bucketShare) {
-                return Self::errorResponse(message: 'Shared bucket not found!', statusCode: 404);
+                return Self::errorResponse(message: 'Shared bucket not found!', status: 404);
             }
 
             if (!empty($bucketShare->password) && $bucketShare->password !== $request->input('password')) {
-                return Self::errorResponse(message: 'Password is wrong!', statusCode: 403);
+                return Self::errorResponse(message: 'Password is wrong!', status: 403);
             }
 
             $bucket = $bucketShare->bucket;
             if (!$bucket) {
-                return Self::errorResponse(message: 'Bucket not found!', statusCode: 404);
+                return Self::errorResponse(message: 'Bucket not found!', status: 404);
             }
 
             $id = $fileId ?? $request->input('file_id') ?? $request->query('file_id');
             if (!$id) {
-                return Self::errorResponse(message: 'File ID is required', statusCode: 422);
+                return Self::errorResponse(message: 'File ID is required', status: 422);
             }
 
             return $this->bucket->fileDownload($id, $bucket->channel_id);

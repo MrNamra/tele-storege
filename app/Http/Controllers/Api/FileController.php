@@ -138,16 +138,16 @@ class FileController extends Controller
             $fId = $fileId ?? $request->input('file_id') ?? $request->query('file_id');
 
             if (!$bId || !$fId) {
-                return Self::errorResponse(message: 'bucket_id and file_id are required', statusCode: 422);
+                return Self::errorResponse(message: 'bucket_id and file_id are required', status: 422);
             }
 
             $bucket = Bucket::find($bId);
             if (!$bucket) {
-                return Self::errorResponse(message: 'Bucket not found', statusCode: 404);
+                return Self::errorResponse(message: 'Bucket not found', status: 404);
             }
 
             if (!$this->authorizeBucketAccess($bucket, $request)) {
-                return Self::errorResponse(message: 'Access denied to bucket', statusCode: 403);
+                return Self::errorResponse(message: 'Access denied to bucket', status: 403);
             }
 
             return $this->fileRepo->fileDownload($fId, $bucket->channel_id);
