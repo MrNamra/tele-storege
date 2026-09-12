@@ -61,17 +61,49 @@ class FileController extends Controller
         }
     }
 
-    public function thumbnail(TelegramClient $telegram, Bucket $bucket, $id)
+    public function authorizeBucketAccess(Bucket $bucket, Request $request): bool
     {
-        return $telegram->streamThumbnail(channelId: $bucket->channel_id, msgId: decrypt($id));
+        // 1. Shared bucket: no authentication required!
+        if ($bucket->bucketShare()->exists()) {
+            return true;
+        }
+
+        // 2. Private bucket: authenticated user must be the bucket owner
+        $user = $request->user('sanctum');
+        if (!$user && $request->filled('token')) {
+            $tokenModel = \Laravel\Sanctum\PersonalAccessToken::findToken($request->query('token'));
+            if ($tokenModel) {
+                $user = $tokenModel->tokenable;
+            }
+        }
+
+        if ($user && (int)$bucket->user_id === (int)$user->id) {
+            return true;
+        }
+
+        return false;
     }
 
-    public function stream(TelegramClient $telegram, Bucket $bucket, $id)
+    public function thumbnail(Request $request, TelegramClient $telegram, Bucket $bucket, $id)
     {
-        return $telegram->streamFile(channelId: $bucket->channel_id, msgId: $id);
+        if (!$this->authorizeBucketAccess($bucket, $request)) {
+            abort(403, 'Unauthorized access to bucket');
+        }
+
+        $msgId = safeDecryptId($id) ?? (is_numeric($id) ? (int)$id : decrypt($id));
+        if (!$msgId) {
+            abort(404, 'Invalid thumbnail ID');
+        }
+
+        return $telegram->streamThumbnail(channelId: $bucket->channel_id, msgId: $msgId);
     }
 
-    public function removeFile(Request $request,Bucket $bucket)
+    public function stream(Request $request, TelegramClient $telegram, Bucket $bucket, $id)
+    {
+        return $this->streamFileSigned($request, $telegram, $bucket, $id);
+    }
+
+    public function removeFile(Request $request, Bucket $bucket)
     {
         $request->validate([
             'file_id'=> 'required|array',
@@ -79,8 +111,8 @@ class FileController extends Controller
         ]);
 
         try {
-            if(!$bucket->firstWhere('user_id', Auth::id())) {
-                return Self::errorResponse(message:'Bucket or File not Find');
+            if ($bucket->user_id !== Auth::id()) {
+                return Self::errorResponse(message:'Bucket or File not found');
             }
 
             $this->fileRepo->deleteFiles(
@@ -88,7 +120,7 @@ class FileController extends Controller
                 IDs: $request->file_id
             );
 
-            return Self::successResponse(message: 'File(s) Delete Successfully');
+            return Self::successResponse(message: 'File(s) Deleted Successfully');
         } catch (Exception $e) {
             return Self::errorResponse(message: $e->getMessage());
         }
@@ -96,35 +128,29 @@ class FileController extends Controller
 
     public function downlaodFile(FileRequest $request)
     {
-        try {
-            $bucket = Bucket::firstWhere(['user_id' => auth()->id(), 'id' => $request->bucket_id]);
-
-            if(!$bucket) {
-                return Self::errorResponse(message: 'Bucket not found / Selected');
-            }
-
-            return $this->fileRepo->fileDownlaod($request->files, $bucket->chennel_id);
-
-        } catch (Exception $e) {
-            return Self::errorResponse(message: $e->getMessage());
-        }
+        return $this->downloadFile($request);
     }
 
-    public function downloadFile(Request $request)
+    public function downloadFile(Request $request, $bucketId = null, $fileId = null)
     {
         try {
-            $request->validate([
-                'file_id' => 'required|string',
-                'bucket_id' => 'required|exists:buckets,id',
-            ]);
+            $bId = $bucketId ?? $request->input('bucket_id') ?? $request->query('bucket_id');
+            $fId = $fileId ?? $request->input('file_id') ?? $request->query('file_id');
 
-            $bucket = Bucket::firstWhere(['user_id' => auth()->id(), 'id' => $request->bucket_id]);
-
-            if(!$bucket) {
-                return Self::errorResponse(message: 'Bucket not found or access denied');
+            if (!$bId || !$fId) {
+                return Self::errorResponse(message: 'bucket_id and file_id are required', statusCode: 422);
             }
 
-            return $this->fileRepo->fileDownlaod($request->file_id, $bucket->channel_id);
+            $bucket = Bucket::find($bId);
+            if (!$bucket) {
+                return Self::errorResponse(message: 'Bucket not found', statusCode: 404);
+            }
+
+            if (!$this->authorizeBucketAccess($bucket, $request)) {
+                return Self::errorResponse(message: 'Access denied to bucket', statusCode: 403);
+            }
+
+            return $this->fileRepo->fileDownload($fId, $bucket->channel_id);
 
         } catch (Exception $e) {
             return Self::errorResponse(message: $e->getMessage());
@@ -139,119 +165,113 @@ class FileController extends Controller
                 'bucket_id' => 'required|exists:buckets,id',
             ]);
 
-            $bucket = Bucket::firstWhere(['user_id' => auth()->id(), 'id' => $request->bucket_id]);
+            $bucket = Bucket::firstWhere(['id' => $request->bucket_id]);
 
-            if(!$bucket) {
+            if(!$bucket || !$this->authorizeBucketAccess($bucket, $request)) {
                 return Self::errorResponse(message: 'Bucket not found or access denied');
             }
 
-            $msgId = decrypt($request->file_id);
+            $msgId = safeDecryptId($request->file_id) ?? (is_numeric($request->file_id) ? (int)$request->file_id : decrypt($request->file_id));
 
-            $result = $telegram->client()->messages->getMessages([
-                'peer' => $bucket->channel_id,
-                'id'   => [$msgId],
-            ]);
-
-            $message = $result['messages'][0] ?? null;
-
-            if (!$message || empty($message['media'])) {
-                return Self::errorResponse(message: 'File not found');
-            }
-
-            $media = $message['media'];
-
-            // Detect mime type and filename
-            if (isset($media['photo'])) {
-                $mime = 'image/jpeg';
-                $filename = 'image.jpg';
-            } elseif (isset($media['document'])) {
-                $mime = $media['document']['mime_type'] ?? 'application/octet-stream';
-                $filename = 'file';
-                foreach ($media['document']['attributes'] as $attr) {
-                    if ($attr['_'] === 'documentAttributeFilename') {
-                        $filename = $attr['file_name'];
-                        break;
-                    }
-                }
-            } else {
-                return Self::errorResponse(message: 'Unsupported media type');
-            }
-
-            // Stream the file with proper headers for inline viewing
-            return response()->stream(function () use ($telegram, $media) {
-                $out = fopen('php://output', 'wb');
-                $telegram->client()->downloadToStream($media, $out);
-                fclose($out);
-            }, 200, [
-                'Content-Type'        => $mime,
-                'Content-Disposition' => 'inline; filename="'.$filename.'"',
-                'Accept-Ranges'       => 'bytes',
-                'Cache-Control'       => 'public, max-age=3600',
-                'X-Content-Type-Options' => 'nosniff',
-            ]);
+            return $this->streamFileSigned($request, $telegram, $bucket, (string)$msgId);
 
         } catch (Exception $e) {
             return Self::errorResponse(message: $e->getMessage());
         }
     }
 
-    public function streamFileSigned(TelegramClient $telegram, Bucket $bucket, $id)
+    public function streamFileSigned(Request $request, TelegramClient $telegram, Bucket $bucket, $id)
     {
         try {
-            // Bucket is already resolved by route model binding
+            if (!$this->authorizeBucketAccess($bucket, $request)) {
+                abort(403, 'Unauthorized access to bucket');
+            }
 
-            $msgId = decrypt($id);
+            $msgId = safeDecryptId($id) ?? (is_numeric($id) ? (int)$id : decrypt($id));
 
             if (!$msgId) {
                 Log::error('Invalid file ID for stream: ' . $id);
                 abort(404, 'Invalid file ID');
             }
 
-            Log::info('Streaming file - bucket: ' . $bucket->id . ', channel_id: ' . $bucket->channel_id . ', msgId: ' . $msgId);
-
-            // Use getHistory instead of getMessages (like streamThumbnail and downlaodFiles do)
-            // This is more reliable for getting messages from channels
-            $history = $telegram->client()->messages->getHistory(
-                peer: $bucket->channel_id,
-                offset_id: $msgId + 1,
-                limit: 1
-            );
-
-            Log::info('Telegram API response: ' . json_encode(['messages_count' => count($history['messages'] ?? [])]));
+            $history = null;
+            try {
+                $history = $telegram->client()->messages->getHistory(
+                    peer: $bucket->channel_id,
+                    offset_id: $msgId + 1,
+                    limit: 1
+                );
+            } catch (\Throwable $e) {
+                Log::warning('getHistory failed in streamFileSigned: ' . $e->getMessage());
+            }
 
             $message = $history['messages'][0] ?? null;
 
-            if (!$message) {
-                Log::error('Message not found for stream - bucket: ' . $bucket->id . ', channel_id: ' . $bucket->channel_id . ', msgId: ' . $msgId);
-                abort(404, 'File not found - message does not exist');
+            if (!$message || empty($message['media'])) {
+                $result = $telegram->client()->messages->getMessages([
+                    'peer' => $bucket->channel_id,
+                    'id'   => [$msgId],
+                ]);
+                $message = $result['messages'][0] ?? null;
             }
 
-            if (empty($message['media'])) {
-                Log::error('Message has no media - bucket: ' . $bucket->id . ', msgId: ' . $msgId . ', message: ' . json_encode($message));
-                abort(404, 'File not found - no media');
+            if (!$message || empty($message['media'])) {
+                abort(404, 'File not found');
             }
 
             $media = $message['media'];
 
             // Detect mime type and filename
+            $isHeic = false;
             if (isset($media['photo'])) {
                 $mime = 'image/jpeg';
-                $filename = 'image.jpg';
+                $filename = 'photo_' . $msgId . '.jpg';
             } elseif (isset($media['document'])) {
                 $mime = $media['document']['mime_type'] ?? 'application/octet-stream';
-                $filename = 'file';
-                foreach ($media['document']['attributes'] as $attr) {
+                $filename = 'file_' . $msgId;
+                foreach ($media['document']['attributes'] ?? [] as $attr) {
                     if ($attr['_'] === 'documentAttributeFilename') {
                         $filename = $attr['file_name'];
                         break;
                     }
                 }
+                $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+                if ($ext === 'heic' || $ext === 'heif' || $mime === 'image/heic' || $mime === 'image/heif') {
+                    $isHeic = true;
+                }
             } else {
-                Log::error('Unsupported media type for stream - bucket: ' . $bucket->id);
                 abort(404, 'Unsupported media type');
             }
 
-            // Stream the file with proper headers for inline viewing
+            // If HEIC, convert to JPEG for universal browser preview (Chrome/Firefox/etc.)
+            if ($isHeic) {
+                $cleanChannel = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)$bucket->channel_id);
+                $heicCacheDir = storage_path('app/heic_cache');
+                if (!is_dir($heicCacheDir)) {
+                    @mkdir($heicCacheDir, 0775, true);
+                }
+                $cachedJpeg = "{$heicCacheDir}/heic_{$cleanChannel}_{$msgId}.jpg";
+
+                if (!file_exists($cachedJpeg) || filesize($cachedJpeg) === 0) {
+                    $tempHeic = tempnam(sys_get_temp_dir(), 'tg_heic_');
+                    $outStream = fopen($tempHeic, 'wb');
+                    $telegram->client()->downloadToStream($media, $outStream);
+                    fclose($outStream);
+
+                    convertHeicToJpeg($tempHeic, $cachedJpeg, 0.9);
+                    @unlink($tempHeic);
+                }
+
+                if (file_exists($cachedJpeg) && filesize($cachedJpeg) > 0) {
+                    return response()->file($cachedJpeg, [
+                        'Content-Type'        => 'image/jpeg',
+                        'Content-Disposition' => 'inline; filename="' . pathinfo($filename, PATHINFO_FILENAME) . '.jpg"',
+                        'Cache-Control'       => 'public, max-age=86400',
+                        'Access-Control-Allow-Origin' => '*',
+                    ]);
+                }
+            }
+
             return response()->stream(function () use ($telegram, $media) {
                 $out = fopen('php://output', 'wb');
                 $telegram->client()->downloadToStream($media, $out);
@@ -263,7 +283,7 @@ class FileController extends Controller
                 'Cache-Control'       => 'public, max-age=3600',
                 'X-Content-Type-Options' => 'nosniff',
                 'Access-Control-Allow-Origin' => '*',
-                'Access-Control-Allow-Methods' => 'GET',
+                'Access-Control-Allow-Methods' => 'GET, HEAD, OPTIONS',
             ]);
 
         } catch (\Illuminate\Contracts\Encryption\DecryptException $e) {
@@ -273,8 +293,8 @@ class FileController extends Controller
             Log::error('Bucket not found for stream: ' . $e->getMessage());
             abort(404, 'Bucket not found');
         } catch (Exception $e) {
-            Log::error('Stream file error: ' . $e->getMessage() . ' | Trace: ' . $e->getTraceAsString());
-            abort(404, 'File not found: ' . $e->getMessage());
+            Log::error('Stream file error: ' . $e->getMessage());
+            abort(404, 'File not found');
         }
     }
 }

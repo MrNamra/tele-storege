@@ -23,8 +23,12 @@ class SharedBucketController extends Controller
     public function index(Request $request, $code): JsonResponse
     {
         try {
-            $bucket = BucketShare::firstWhere(["code"=> $code]);
-            $response = $this->bucket->bucketData($request, $bucket->bucket);
+            $bucketShare = BucketShare::firstWhere(["code" => $code]);
+            if (!$bucketShare || !$bucketShare->bucket) {
+                return Self::errorResponse(message: 'Shared bucket not found', statusCode: 404);
+            }
+
+            $response = $this->bucket->bucketData($request->all(), $bucketShare->bucket);
             return Self::successResponse(data: $response);
         } catch (Exception $e) {
             return Self::errorResponse(message: $e->getMessage());
@@ -34,31 +38,45 @@ class SharedBucketController extends Controller
     public function uploadFile(CodeFileUploadRequest $request, $code): JsonResponse
     {
         try {
-            $bucket = BucketShare::firstWhere(["code"=> $code, 'password' => $request->password]);
-            if(!$bucket) {
-                return Self::errorResponse(message: 'Password is wrong!');
+            $bucketShare = BucketShare::firstWhere(["code" => $code]);
+            if (!$bucketShare || !$bucketShare->bucket) {
+                return Self::errorResponse(message: 'Shared bucket not found', statusCode: 404);
             }
-            $this->bucket->fileUpload($request->file('files'), $bucket->bucket);
-            return Self::successResponse(message: 'File(s) Upload Successfull');
+
+            if (!empty($bucketShare->password) && $bucketShare->password !== $request->password) {
+                return Self::errorResponse(message: 'Password is wrong!', statusCode: 403);
+            }
+
+            $this->bucket->fileUpload($request->file('files'), $bucketShare->bucket);
+            return Self::successResponse(message: 'File(s) Upload Successful');
         } catch (Exception $e) {
             return Self::errorResponse(message: $e->getMessage());
         }
     }
 
-    public function downloadFile(Request $request, $code)
+    public function downloadFile(Request $request, $code, $fileId = null)
     {
         try {
-            $bucketShare = BucketShare::firstWhere(["code"=> $code, 'password' => $request->password]);
-            if(!$bucketShare) {
-                return Self::errorResponse(message: 'Password is wrong!');
+            $bucketShare = BucketShare::firstWhere(["code" => $code]);
+            if (!$bucketShare) {
+                return Self::errorResponse(message: 'Shared bucket not found!', statusCode: 404);
+            }
+
+            if (!empty($bucketShare->password) && $bucketShare->password !== $request->input('password')) {
+                return Self::errorResponse(message: 'Password is wrong!', statusCode: 403);
             }
 
             $bucket = $bucketShare->bucket;
-            if(!$bucket) {
-                return Self::errorResponse(message: 'Bucket not found!');
+            if (!$bucket) {
+                return Self::errorResponse(message: 'Bucket not found!', statusCode: 404);
             }
 
-            return $this->bucket->fileDownload($request, $bucket->channel_id);
+            $id = $fileId ?? $request->input('file_id') ?? $request->query('file_id');
+            if (!$id) {
+                return Self::errorResponse(message: 'File ID is required', statusCode: 422);
+            }
+
+            return $this->bucket->fileDownload($id, $bucket->channel_id);
 
         } catch (Exception $e) {
             return Self::errorResponse(message: $e->getMessage());

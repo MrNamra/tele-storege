@@ -35,4 +35,9 @@ return [
         ],
     ],
 
+    'telegram' => [
+        'api_id'   => env('TELEGRAM_API_ID', 0),
+        'api_hash' => env('TELEGRAM_API_HASH', ''),
+    ],
+
 ];

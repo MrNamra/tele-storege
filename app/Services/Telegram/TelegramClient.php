@@ -9,19 +9,76 @@ use Illuminate\Support\Facades\URL;
 class TelegramClient
 {
     protected API $MadelineProto;
+    protected bool $started = false;
 
     public function __construct()
     {
         $session = storage_path('telegram/session.madeline');
+        $sessionDir = dirname($session);
+        if (!is_dir($sessionDir)) {
+            @mkdir($sessionDir, 0775, true);
+        }
+
+        $settings = new \danog\MadelineProto\Settings;
+        $appInfo = $settings->getAppInfo();
+        $apiId = (int) (config('services.telegram.api_id') ?: env('TELEGRAM_API_ID', 27622442));
+        $apiHash = (string) (config('services.telegram.api_hash') ?: env('TELEGRAM_API_HASH', 'd21311e9010f410a84606f286a45939a'));
+
+        if ($apiId && $apiHash) {
+            $appInfo->setApiId($apiId);
+            $appInfo->setApiHash($apiHash);
+        }
+        $appInfo->setShowPrompt(false);
 
         // Initialize MadelineProto instance
-        $this->MadelineProto = new API($session);
+        $this->MadelineProto = new API($session, $settings);
+    }
 
-        $this->MadelineProto->start();
+    public function getAuthorization(): int
+    {
+        try {
+            return $this->MadelineProto->getAuthorization();
+        } catch (\Throwable $e) {
+            return API::NOT_LOGGED_IN;
+        }
+    }
+
+    public function isLoggedIn(): bool
+    {
+        return $this->getAuthorization() === API::LOGGED_IN;
+    }
+
+    public function startInteractiveLogin(): array
+    {
+        $this->started = true;
+        return $this->MadelineProto->start();
+    }
+
+    public function connect(): array
+    {
+        return $this->startInteractiveLogin();
+    }
+
+    protected function ensureStarted(): void
+    {
+        if (!$this->started) {
+            $this->started = true;
+            if ($this->isLoggedIn()) {
+                try {
+                    $this->MadelineProto->start();
+                } catch (\Throwable $e) {
+                    Log::warning("MadelineProto start: " . $e->getMessage());
+                }
+            }
+        }
     }
 
     public function client(): API
     {
+        $this->ensureStarted();
+        if (!$this->isLoggedIn()) {
+            throw new \Exception("Telegram session is not logged in. Please run 'php artisan telegram:login' in your terminal to connect your Telegram account.");
+        }
         return $this->MadelineProto;
     }
     public function createPrivateChannel(string $name): array
@@ -136,10 +193,11 @@ class TelegramClient
     }
     public function uploadFileToChannel(string $channelId, $file, string $originalName)
     {
-        // Upload file to Telegram
-        $inputFile = $this->client()->upload($file->getRealPath(), $originalName);
-
         $mimeType = $file->getMimeType() ?? 'application/octet-stream';
+        $realPath = $file->getRealPath();
+
+        // 1. Upload main file to Telegram
+        $inputFile = $this->client()->upload($realPath, $originalName);
 
         $attributes = [
             [
@@ -147,68 +205,135 @@ class TelegramClient
                 'file_name' => $originalName
             ]
         ];
-        if (str_starts_with($mimeType, 'image/')) {
-            if ($size = @getimagesize($file->getRealPath())) {
-                [$w, $h] = getimagesize($file->getRealPath());
+
+        $mediaPayload = [
+            '_' => 'inputMediaUploadedDocument',
+            'file' => $inputFile,
+            'mime_type' => $mimeType,
+        ];
+
+        $tempThumb = null;
+        $isImage = str_starts_with($mimeType, 'image/');
+
+        if ($isImage) {
+            if ($size = @getimagesize($realPath)) {
+                [$w, $h] = $size;
                 $attributes[] = [
                     '_' => 'documentAttributeImageSize',
                     'w' => $w,
                     'h' => $h
                 ];
             }
-        }
-        // else {
-        //     $media = [
-        //         '_' => 'inputMediaUploadedDocument',
-        //         'file' => $inputFile,
-        //         'mime_type' => $mimeType,
-        //         'attributes' => [
-        //             ['_' => 'documentAttributeFilename', 'file_name' => $originalName]
-        //         ]
-        //     ];
-        // }
 
-        return $this->client()->messages->sendMedia(
+            // Generate a lightweight, high-quality compressed thumbnail (~15-25 KB)
+            $tempThumb = tempnam(sys_get_temp_dir(), 'tg_thumb_') . '.jpg';
+            if (generateThumbnail($realPath, $tempThumb, 320, 320, 75)) {
+                try {
+                    $mediaPayload['thumb'] = $this->client()->upload($tempThumb, 'thumb.jpg');
+                } catch (\Throwable $e) {
+                    Log::warning("Thumbnail upload to Telegram failed: " . $e->getMessage());
+                }
+            }
+        } elseif (str_starts_with($mimeType, 'video/')) {
+            $attributes[] = [
+                '_' => 'documentAttributeVideo',
+                'supports_streaming' => true,
+            ];
+        } elseif (str_starts_with($mimeType, 'audio/')) {
+            $attributes[] = [
+                '_' => 'documentAttributeAudio',
+                'voice' => false,
+            ];
+        }
+
+        $mediaPayload['attributes'] = $attributes;
+
+        $response = $this->client()->messages->sendMedia(
             peer: $channelId,
-             media: [
-                '_' => 'inputMediaUploadedDocument',
-                'file' => $inputFile,
-                'mime_type' => $mimeType,
-                'attributes' => $attributes
-            ]
+            media: $mediaPayload
         );
+
+        // Cache generated thumbnail locally for instant serving
+        if ($isImage && $tempThumb && file_exists($tempThumb)) {
+            $msgId = null;
+            if (!empty($response['updates'])) {
+                foreach ($response['updates'] as $up) {
+                    if (isset($up['message']['id'])) {
+                        $msgId = $up['message']['id'];
+                        break;
+                    }
+                    if (isset($up['id'])) {
+                        $msgId = $up['id'];
+                        break;
+                    }
+                }
+            }
+            if (!$msgId && isset($response['id'])) {
+                $msgId = $response['id'];
+            }
+
+            if ($msgId) {
+                $cleanChannelId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)$channelId);
+                $cacheDir = storage_path('app/thumbnails');
+                if (!is_dir($cacheDir)) {
+                    @mkdir($cacheDir, 0775, true);
+                }
+                copy($tempThumb, "{$cacheDir}/thumb_{$cleanChannelId}_{$msgId}.jpg");
+            }
+            @unlink($tempThumb);
+        }
+
+        return $response;
     }
     public function getChannelFiles(string $channelId, string $bucket_id, int $page = 1, int $perPage = 20)
     {
-        $history = $this->client()->messages->getHistory(
-            peer: $channelId,
-            add_offset: ($page - 1) * $perPage,
-            limit: $perPage
-        );
+        $history = null;
+        try {
+            $history = $this->client()->messages->getHistory(
+                peer: $channelId,
+                add_offset: ($page - 1) * $perPage,
+                limit: $perPage
+            );
+        } catch (\Throwable $e) {
+            Log::warning("getChannelFiles getHistory failed for channel {$channelId}: " . $e->getMessage());
+            return [];
+        }
+
+        if (!$history || empty($history['messages'])) {
+            return [];
+        }
 
         $files = [];
+        $isShared = \App\Models\BucketShare::where('bucket_id', $bucket_id)->exists();
+        $token = request()->bearerToken() ?? request()->query('token');
+        $tokenParam = (!$isShared && $token) ? ('?token=' . urlencode($token)) : '';
 
         foreach ($history['messages'] as $msg) {
             if (!isset($msg['media'])) continue;
 
             $media = $msg['media'];
+            $encId = safeEncryptId($msg['id']);
 
             $file = [
-                'msg_id'     => encrypt($msg['id']),
+                'msg_id'     => $encId,
                 'date'       => $msg['date'],
                 'type'       => null,
                 'file_name'  => null,
                 'mime_type'  => null,
                 'size'       => null,
-                'thumbnail'  => URL::temporarySignedRoute('thumbnail', now()->addMinutes(5), ['bucket' => $bucket_id, 'id' => encrypt($msg['id'])]),
-                'stream_url' => URL::temporarySignedRoute('stream.file.signed', now()->addMinutes(30), ['bucket' => (string)$bucket_id, 'id' => encrypt($msg['id'])]),
-                // 'thumbnail'  => route('thumbnail', ['bucket' => $bucket_id, 'id' => encryptId($msg['id'])]),
+                'thumbnail'  => url("/api/thumbnail/{$bucket_id}/{$encId}") . $tokenParam,
+                'stream_url' => url("/api/stream/{$bucket_id}/{$encId}") . $tokenParam,
             ];
 
             /** PHOTO */
             if (isset($media['photo'])) {
                 $file['type'] = 'photo';
                 $file['mime_type'] = 'image/jpeg';
+                $file['file_name'] = 'photo_' . $msg['id'] . '.jpg';
+                if (!empty($media['photo']['sizes'])) {
+                    $largest = end($media['photo']['sizes']);
+                    $file['size'] = $largest['size'] ?? null;
+                }
                 $files[] = $file;
                 continue;
             }
@@ -221,12 +346,18 @@ class TelegramClient
                 $file['mime_type'] = $doc['mime_type'] ?? null;
                 $file['size'] = $doc['size'] ?? null;
 
-                foreach ($doc['attributes'] as $attr) {
-                    if ($attr['_'] === 'documentAttributeFilename') {
-                        $file['file_name'] = $attr['file_name'];
+                if (!empty($doc['attributes'])) {
+                    foreach ($doc['attributes'] as $attr) {
+                        if ($attr['_'] === 'documentAttributeFilename') {
+                            $file['file_name'] = $attr['file_name'];
+                        }
+                        if ($attr['_'] === 'documentAttributeVideo') $file['type'] = 'video';
+                        if ($attr['_'] === 'documentAttributeAudio') $file['type'] = 'audio';
                     }
-                    if ($attr['_'] === 'documentAttributeVideo') $file['type'] = 'video';
-                    if ($attr['_'] === 'documentAttributeAudio') $file['type'] = 'audio';
+                }
+
+                if (empty($file['file_name'])) {
+                    $file['file_name'] = 'file_' . $msg['id'];
                 }
 
                 $files[] = $file;
@@ -277,144 +408,206 @@ class TelegramClient
 
         throw new \Exception('Unsupported media');
     }
-    public function streamThumbnailFromTelegram(string $channelId, int $messageId)
+    public function serveFallbackThumbnail(?string $mime = null)
     {
-        $response = $this->client()->messages->getHistory(
-            peer: $channelId,
-            offset_id: (int) $messageId,
-            add_offset: -1,
-            limit: 1
-        );
-
-        if (empty($response['messages'][0])) {
-            abort(404, "Message not found");
+        $color = '#6366f1';
+        $label = 'FILE';
+        if ($mime) {
+            if (str_starts_with($mime, 'video/')) {
+                $color = '#ef4444';
+                $label = 'VIDEO';
+            } elseif (str_starts_with($mime, 'audio/')) {
+                $color = '#8b5cf6';
+                $label = 'AUDIO';
+            } elseif (str_contains($mime, 'pdf')) {
+                $color = '#dc2626';
+                $label = 'PDF';
+            } elseif (str_contains($mime, 'zip') || str_contains($mime, 'compressed') || str_contains($mime, 'tar')) {
+                $color = '#f59e0b';
+                $label = 'ZIP';
+            }
         }
 
-        $msg = $response['messages'][0];
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160">
+  <rect width="160" height="160" rx="16" fill="#f8fafc"/>
+  <rect x="25" y="20" width="110" height="120" rx="12" fill="white" stroke="#e2e8f0" stroke-width="2"/>
+  <rect x="40" y="36" width="80" height="38" rx="8" fill="' . $color . '" opacity="0.12"/>
+  <text x="80" y="60" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="700" fill="' . $color . '" text-anchor="middle" letter-spacing="1">' . $label . '</text>
+  <circle cx="80" y="104" r="16" fill="' . $color . '"/>
+  <path d="M75 96 L89 104 L75 112 Z" fill="white"/>
+</svg>';
 
-        if (!isset($msg['media']['photo'])) {
-            abort(404, "No photo found");
-        }
-
-        $photo = $msg['media']['photo'];
-        $sizes = $photo['sizes'];
-
-        if ($sizes[0]['_'] !== 'photoStrippedSize') {
-            abort(404, "No photo found");
-        }
-
+        return response($svg, 200, [
+            'Content-Type'  => 'image/svg+xml',
+            'Cache-Control' => 'public, max-age=604800, immutable',
+        ]);
     }
 
-    public function old_streamThumbnail(int $channelId, int $msgId)
+    public function streamThumbnail(int|string $channelId, int $msgId)
     {
-        $history = $this->client()->messages->getHistory(
-            peer: $channelId,
-            offset_id: $msgId,
-            add_offset: -1,
-            limit: 1
-        );
+        $cleanChannelId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)$channelId);
+        $cacheDir = storage_path('app/thumbnails');
+        if (!is_dir($cacheDir)) {
+            @mkdir($cacheDir, 0775, true);
+        }
+        $cachePath = "{$cacheDir}/thumb_{$cleanChannelId}_{$msgId}.jpg";
 
-        $msg = $history['messages'][0] ?? null;
-        if (!$msg || !isset($msg['media'])) abort(404);
+        // 1. Tier 1: Instant Disk Cache (<1ms, ~20KB)
+        if (file_exists($cachePath) && filesize($cachePath) > 0) {
+            return response()->file($cachePath, [
+                'Content-Type'  => 'image/jpeg',
+                'Cache-Control' => 'public, max-age=604800, immutable',
+                'ETag'          => md5_file($cachePath),
+            ]);
+        }
+
+        // 2. Fetch message from Telegram
+        $msg = null;
+        try {
+            $history = $this->client()->messages->getHistory(
+                peer: $channelId,
+                offset_id: $msgId + 1,
+                limit: 1
+            );
+            $msg = $history['messages'][0] ?? null;
+        } catch (\Throwable $e) {
+            Log::warning("streamThumbnail getHistory failed for channel {$channelId}, msg {$msgId}: " . $e->getMessage());
+        }
+
+        if (!$msg || empty($msg['media'])) {
+            try {
+                $res = $this->client()->messages->getMessages([
+                    'peer' => $channelId,
+                    'id'   => [$msgId],
+                ]);
+                $msg = $res['messages'][0] ?? null;
+            } catch (\Throwable $e) {}
+        }
+
+        if (!$msg || empty($msg['media'])) {
+            return $this->serveFallbackThumbnail();
+        }
 
         $media = $msg['media'];
 
+        // Case A: Photo
         if (isset($media['photo'])) {
             $photo = $media['photo'];
-            $sizes = $photo['sizes'];
+            $sizes = $photo['sizes'] ?? [];
+            $thumb = pickBestThumb($sizes);
 
-            if ($sizes[0]['_'] === 'photoStrippedSize') {
+            if ($thumb && ($thumb['_'] ?? '') === 'photoSize') {
+                $tempFile = tempnam(sys_get_temp_dir(), 'tg_thumb_');
+                $tempStream = fopen($tempFile, 'wb');
+                try {
+                    $photoToDownload = $photo;
+                    $photoToDownload['sizes'] = [$thumb];
+                    $this->client()->downloadToStream($photoToDownload, $tempStream);
+                    fclose($tempStream);
 
-                // $jpegBytes = (string) $sizes[0]['inflated'];
-                $thumb = $sizes[1];
+                    generateThumbnail($tempFile, $cachePath, 320, 320, 75);
+                } catch (\Throwable $e) {
+                    Log::error("Failed to download photoSize thumb: " . $e->getMessage());
+                } finally {
+                    @unlink($tempFile);
+                }
 
-                return response()->stream(function () use ($photo) {
-                    $stream = fopen('php://output', 'wb');
-                    $this->client()->downloadToStream($photo, $stream);
-                }, 200, [
-                    "Content-Type" => "image/jpeg"
-                ]);
+                if (file_exists($cachePath) && filesize($cachePath) > 0) {
+                    return response()->file($cachePath, [
+                        'Content-Type'  => 'image/jpeg',
+                        'Cache-Control' => 'public, max-age=604800',
+                        'ETag'          => md5_file($cachePath),
+                    ]);
+                }
+            }
+        }
+
+        // Case B: Document with thumbs
+        if (!empty($media['document']['thumbs'])) {
+            $doc   = $media['document'];
+            $thumb = pickBestThumb($doc['thumbs']);
+
+            if ($thumb && ($thumb['_'] ?? '') !== 'photoStrippedSize') {
+                $tempFile = tempnam(sys_get_temp_dir(), 'tg_doc_thumb_');
+                $tempStream = fopen($tempFile, 'wb');
+                try {
+                    $this->client()->downloadToStream([
+                        'document' => $doc,
+                        'thumb'    => $thumb,
+                    ], $tempStream);
+                    fclose($tempStream);
+
+                    generateThumbnail($tempFile, $cachePath, 320, 320, 75);
+                } catch (\Throwable $e) {
+                    Log::error("Failed to download doc thumb: " . $e->getMessage());
+                } finally {
+                    @unlink($tempFile);
+                }
+
+                if (file_exists($cachePath) && filesize($cachePath) > 0) {
+                    return response()->file($cachePath, [
+                        'Content-Type'  => 'image/jpeg',
+                        'Cache-Control' => 'public, max-age=604800',
+                        'ETag'          => md5_file($cachePath),
+                    ]);
+                }
+            }
+        }
+
+        // Case C: Image document without thumbs
+        $mime = $media['document']['mime_type'] ?? '';
+        if (str_starts_with($mime, 'image/')) {
+            $heicCache = storage_path("app/heic_cache/heic_{$cleanChannelId}_{$msgId}.jpg");
+            if (file_exists($heicCache) && filesize($heicCache) > 0) {
+                generateThumbnail($heicCache, $cachePath, 320, 320, 75);
+            } else {
+                $tempFile = tempnam(sys_get_temp_dir(), 'tg_img_');
+                $tempStream = fopen($tempFile, 'wb');
+                try {
+                    $this->client()->downloadToStream($media, $tempStream);
+                    fclose($tempStream);
+
+                    generateThumbnail($tempFile, $cachePath, 320, 320, 75);
+                } catch (\Throwable $e) {
+                    Log::error("Failed to resize image document: " . $e->getMessage());
+                } finally {
+                    @unlink($tempFile);
+                }
             }
 
-            // Otherwise: a downloadable thumbnail exists
-            $thumb = $sizes[1];
-
-            return response()->stream(function () use ($thumb) {
-                $this->client()->downloadToStream($thumb, fopen('php://output', 'wb'));
-            }, 200, ["Content-Type" => "image/jpeg"]);
+            if (file_exists($cachePath) && filesize($cachePath) > 0) {
+                return response()->file($cachePath, [
+                    'Content-Type'  => 'image/jpeg',
+                    'Cache-Control' => 'public, max-age=604800',
+                    'ETag'          => md5_file($cachePath),
+                ]);
+            }
         }
 
-        if (isset($media['document']['thumbs'][0])) {
-            $thumb = [
-                'document' => $media['document'],
-                'thumb' => $media['document']['thumbs'][0]
-            ];
-
-            return response()->stream(function () use ($thumb) {
-                $this->client()->downloadToStream($thumb, fopen('php://output', 'wb'));
-            }, 200, ["Content-Type" => "image/jpeg"]);
-        }
-
-        return response()->file(public_path('fallback/file.jpg'));
-    }
-    public function streamThumbnail(int|string $channelId, int $msgId)
-    {
-        $history = $this->client()->messages->getHistory(
-            peer: $channelId,
-            offset_id: $msgId + 1,
-            limit: 1
-        );
-
-        $msg = $history['messages'][0] ?? null;
-        if (!$msg || empty($msg['media']['document']['thumbs'])) {
-            abort(404);
-        }
-
-        $doc   = $msg['media']['document'];
-        // dd($doc);
-        $thumb = pickBestThumb($doc['thumbs']);
-
-        return response()->stream(function () use ($doc, $thumb) {
-            $out = fopen('php://output', 'wb');
-
-            $this->client()->downloadToStream([
-                'document' => $doc,
-                'thumb'    => $thumb
-            ], $out);
-
-            fclose($out);
-        }, 200, [
-            'Content-Type'  => 'image/jpeg',
-            'Cache-Control' => 'public, max-age=86400',
-        ]);
+        // Case D: Non-image files (video, audio, zip, pdf, etc.) -> Instant SVG badge (<1KB)
+        return $this->serveFallbackThumbnail($mime);
     }
     public function streamFile(string $channelId, int $msgId, $stream = null)
     {
-        /*
-        $history = $this->client()->messages->getHistory(
-            peer: $channelId,
-            offset_id: $msgId,
-            add_offset: -1,
-            limit: 1
-        );
+        $message = null;
+        try {
+            $history = $this->client()->messages->getHistory(
+                peer: $channelId,
+                offset_id: $msgId + 1,
+                limit: 1
+            );
+            $message = $history['messages'][0] ?? null;
+        } catch (\Throwable $e) {
+            Log::warning("streamFile getHistory failed: " . $e->getMessage());
+        }
 
-        $msg = $history['messages'][0] ?? null;
-        if (!$msg || !isset($msg['media'])) abort(404);
-
-        $media = $msg['media'];
-
-        return response()->stream(function () use ($media) {
-            $this->client()->downloadToStream($media, fopen('php://output', 'wb'));
-        }, 200, [
-            "Content-Type" => $media['document']['mime_type'] ?? "application/octet-stream"
-        ]);
-        */
-        $result = $this->client()->messages->getMessages([
-            'peer' => $channelId,
-            'id'   => [$msgId],
-        ]);
-
-        $message = $result['messages'][0] ?? null;
+        if (!$message || empty($message['media'])) {
+            $result = $this->client()->messages->getMessages([
+                'peer' => $channelId,
+                'id'   => [$msgId],
+            ]);
+            $message = $result['messages'][0] ?? null;
+        }
 
         if (!$message || empty($message['media'])) {
             throw new \Exception('No media found');
@@ -422,16 +615,22 @@ class TelegramClient
 
         $media = $message['media'];
 
-        // 🔑 Detect mime type
+        // Detect mime type
         if (isset($media['photo'])) {
             $mime = 'image/jpeg';
-            $filename = 'image.jpg';
+            $filename = 'photo_' . $msgId . '.jpg';
         } elseif (isset($media['document'])) {
             $mime = $media['document']['mime_type'] ?? 'application/octet-stream';
-            $filename = $media['document']['attributes'][0]['file_name'] ?? 'file';
+            $filename = 'file_' . $msgId;
+            foreach ($media['document']['attributes'] ?? [] as $attr) {
+                if ($attr['_'] === 'documentAttributeFilename') {
+                    $filename = $attr['file_name'];
+                    break;
+                }
+            }
         } else {
             $mime = 'application/octet-stream';
-            $filename = 'file';
+            $filename = 'file_' . $msgId;
         }
 
         $this->client()->downloadToStream($media, $stream);
@@ -440,7 +639,7 @@ class TelegramClient
     }
     public function deleteFiles(int|string $channel_id, $IDs)
     {
-        $IDs = array_map(fn($id) => decrypt($id), $IDs);
+        $IDs = array_map(fn($id) => safeDecryptId($id) ?? decrypt($id), $IDs);
 
         $this->client()->channels->deleteMessages(
             channel: $channel_id,
@@ -449,12 +648,12 @@ class TelegramClient
 
         return true;
     }
-    public function downlaodFiles($file = null, $channel_id)
+    public function downlaodFiles($file, $channel_id)
     {
-
-         $history = $this->client()->messages->getHistory(
+        $msgId = safeDecryptId($file) ?? (is_numeric($file) ? (int)$file : decrypt($file));
+        $history = $this->client()->messages->getHistory(
             peer: $channel_id,
-            offset_id: $file + 1,
+            offset_id: $msgId + 1,
             limit: 1
         );
 
@@ -466,15 +665,13 @@ class TelegramClient
 
         $media = $message['media'];
 
-        // 3️⃣ Detect media type + meta
         if (isset($media['photo'])) {
             $mime     = 'image/jpeg';
-            $filename = 'image.jpg';
+            $filename = 'photo_' . $msgId . '.jpg';
         } elseif (isset($media['document'])) {
             $mime = $media['document']['mime_type'] ?? 'application/octet-stream';
-
-            $filename = 'file';
-            foreach ($media['document']['attributes'] as $attr) {
+            $filename = 'file_' . $msgId;
+            foreach ($media['document']['attributes'] ?? [] as $attr) {
                 if ($attr['_'] === 'documentAttributeFilename') {
                     $filename = $attr['file_name'];
                     break;
@@ -484,16 +681,17 @@ class TelegramClient
             abort(404, 'Unsupported media');
         }
 
-        // 4️⃣ Stream directly from Telegram
         return response()->stream(function () use ($media) {
             $out = fopen('php://output', 'wb');
             $this->client()->downloadToStream($media, $out);
             fclose($out);
         }, 200, [
             'Content-Type'        => $mime,
-            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+            'Content-Disposition' => 'attachment; filename="' . addcslashes($filename, '"') . '"; filename*=UTF-8\'\'' . rawurlencode($filename),
             'Accept-Ranges'       => 'bytes',
             'Cache-Control'       => 'no-store',
+            'Access-Control-Allow-Origin' => '*',
+            'Access-Control-Expose-Headers' => 'Content-Disposition, Content-Type, Content-Length',
         ]);
     }
 }

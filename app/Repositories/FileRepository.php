@@ -44,8 +44,8 @@ class FileRepository implements FileRepositoryInterface
 
     public function bucketData($data, Bucket $bucket): array
     {
-        $page = (int) $data['page'] ?? 1;
-        $perPage = (int) $data['limit'] ?? 5;
+        $page = (int) ($data['page'] ?? 1);
+        $perPage = (int) ($data['limit'] ?? 10);
 
         return $this->telegram->getChannelFiles(
             channelId: $bucket->channel_id,
@@ -73,6 +73,12 @@ class FileRepository implements FileRepositoryInterface
 
     public function fileDownlaod($files, $chennel_id)
     {
-        return $this->telegram->downlaodFiles(decrypt($files), $chennel_id);
+        return $this->fileDownload($files, $chennel_id);
+    }
+
+    public function fileDownload($files, $channel_id)
+    {
+        $id = safeDecryptId($files) ?? (is_numeric($files) ? (int)$files : decrypt($files));
+        return $this->telegram->downlaodFiles($id, $channel_id);
     }
 }
