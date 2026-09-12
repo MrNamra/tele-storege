@@ -36,8 +36,9 @@ return [
     ],
 
     'telegram' => [
-        'api_id'   => env('TELEGRAM_API_ID', 0),
-        'api_hash' => env('TELEGRAM_API_HASH', ''),
+        'api_id'    => env('TELEGRAM_API_ID', 0),
+        'api_hash'  => env('TELEGRAM_API_HASH', ''),
+        'cache_ttl' => (int) env('TELEGRAM_CACHE_TTL', 7200), // Cache lifetime in seconds (default: 2 hours)
     ],
 
 ];

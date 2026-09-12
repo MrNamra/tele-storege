@@ -245,12 +245,20 @@ class FileController extends Controller
 
             // If HEIC, convert to JPEG for universal browser preview (Chrome/Firefox/etc.)
             if ($isHeic) {
+                \App\Services\Telegram\TelegramClient::scheduleShutdownPrune();
                 $cleanChannel = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)$bucket->channel_id);
                 $heicCacheDir = storage_path('app/heic_cache');
                 if (!is_dir($heicCacheDir)) {
                     @mkdir($heicCacheDir, 0775, true);
                 }
                 $cachedJpeg = "{$heicCacheDir}/heic_{$cleanChannel}_{$msgId}.jpg";
+                $ttl = (int)config('services.telegram.cache_ttl', 7200);
+
+                if (file_exists($cachedJpeg) && filesize($cachedJpeg) > 0) {
+                    if ((time() - filemtime($cachedJpeg)) > $ttl) {
+                        @unlink($cachedJpeg);
+                    }
+                }
 
                 if (!file_exists($cachedJpeg) || filesize($cachedJpeg) === 0) {
                     $tempHeic = tempnam(sys_get_temp_dir(), 'tg_heic_');
@@ -259,14 +267,16 @@ class FileController extends Controller
                     fclose($outStream);
 
                     convertHeicToJpeg($tempHeic, $cachedJpeg, 0.9);
-                    @unlink($tempHeic);
+                    if (file_exists($tempHeic)) {
+                        @unlink($tempHeic);
+                    }
                 }
 
                 if (file_exists($cachedJpeg) && filesize($cachedJpeg) > 0) {
                     return response()->file($cachedJpeg, [
                         'Content-Type'        => 'image/jpeg',
                         'Content-Disposition' => 'inline; filename="' . pathinfo($filename, PATHINFO_FILENAME) . '.jpg"',
-                        'Cache-Control'       => 'public, max-age=86400',
+                        'Cache-Control'       => 'public, max-age=' . $ttl,
                         'Access-Control-Allow-Origin' => '*',
                     ]);
                 }

@@ -280,7 +280,9 @@ class TelegramClient
                 }
                 copy($tempThumb, "{$cacheDir}/thumb_{$cleanChannelId}_{$msgId}.jpg");
             }
-            @unlink($tempThumb);
+            if ($tempThumb && file_exists($tempThumb)) {
+                @unlink($tempThumb);
+            }
         }
 
         return $response;
@@ -313,6 +315,8 @@ class TelegramClient
         if (!is_dir($thumbDir)) {
             @mkdir($thumbDir, 0775, true);
         }
+        $ttl = (int)config('services.telegram.cache_ttl', 7200);
+        self::scheduleShutdownPrune();
 
         foreach ($history['messages'] as $msg) {
             if (!isset($msg['media'])) continue;
@@ -322,6 +326,9 @@ class TelegramClient
 
             // Pre-inflate stripped thumbnail on-the-fly (<0.1ms, zero network calls, zero RAM)
             $preCachePath = "{$thumbDir}/thumb_{$cleanChannelId}_{$msg['id']}.jpg";
+            if (file_exists($preCachePath) && (time() - filemtime($preCachePath) > $ttl)) {
+                @unlink($preCachePath);
+            }
             if (!file_exists($preCachePath) || filesize($preCachePath) === 0) {
                 $strippedJpeg = null;
                 if (isset($media['photo']['sizes'])) {
@@ -471,14 +478,20 @@ class TelegramClient
             @mkdir($cacheDir, 0775, true);
         }
         $cachePath = "{$cacheDir}/thumb_{$cleanChannelId}_{$msgId}.jpg";
+        $ttl = (int)config('services.telegram.cache_ttl', 7200);
+        self::scheduleShutdownPrune();
 
         // 1. Tier 1: Instant Disk Cache (<1ms, ~20KB)
         if (file_exists($cachePath) && filesize($cachePath) > 0) {
-            return response()->file($cachePath, [
-                'Content-Type'  => 'image/jpeg',
-                'Cache-Control' => 'public, max-age=604800, immutable',
-                'ETag'          => md5_file($cachePath),
-            ]);
+            if ((time() - filemtime($cachePath)) > $ttl) {
+                @unlink($cachePath);
+            } else {
+                return response()->file($cachePath, [
+                    'Content-Type'  => 'image/jpeg',
+                    'Cache-Control' => 'public, max-age=' . $ttl,
+                    'ETag'          => md5_file($cachePath),
+                ]);
+            }
         }
 
         // 2. Fetch message from Telegram
@@ -522,7 +535,7 @@ class TelegramClient
             if (file_exists($cachePath) && filesize($cachePath) > 0) {
                 return response()->file($cachePath, [
                     'Content-Type'  => 'image/jpeg',
-                    'Cache-Control' => 'public, max-age=604800, immutable',
+                    'Cache-Control' => 'public, max-age=' . $ttl,
                     'ETag'          => md5_file($cachePath),
                 ]);
             }
@@ -550,13 +563,15 @@ class TelegramClient
                 } catch (\Throwable $e) {
                     Log::error("Failed to download photoSize thumb: " . $e->getMessage());
                 } finally {
-                    @unlink($tempFile);
+                    if (file_exists($tempFile)) {
+                        @unlink($tempFile);
+                    }
                 }
 
                 if (file_exists($cachePath) && filesize($cachePath) > 0) {
                     return response()->file($cachePath, [
                         'Content-Type'  => 'image/jpeg',
-                        'Cache-Control' => 'public, max-age=604800, immutable',
+                        'Cache-Control' => 'public, max-age=' . $ttl,
                         'ETag'          => md5_file($cachePath),
                     ]);
                 }
@@ -596,13 +611,15 @@ class TelegramClient
                 } catch (\Throwable $e) {
                     Log::error("Failed to download doc thumb: " . $e->getMessage());
                 } finally {
-                    @unlink($tempFile);
+                    if (file_exists($tempFile)) {
+                        @unlink($tempFile);
+                    }
                 }
 
                 if (file_exists($cachePath) && filesize($cachePath) > 0) {
                     return response()->file($cachePath, [
                         'Content-Type'  => 'image/jpeg',
-                        'Cache-Control' => 'public, max-age=604800, immutable',
+                        'Cache-Control' => 'public, max-age=' . $ttl,
                         'ETag'          => md5_file($cachePath),
                     ]);
                 }
@@ -613,13 +630,17 @@ class TelegramClient
         $mime = $media['document']['mime_type'] ?? '';
         $heicCache = storage_path("app/heic_cache/heic_{$cleanChannelId}_{$msgId}.jpg");
         if (file_exists($heicCache) && filesize($heicCache) > 0) {
-            generateThumbnail($heicCache, $cachePath, 320, 320, 75);
-            if (file_exists($cachePath) && filesize($cachePath) > 0) {
-                return response()->file($cachePath, [
-                    'Content-Type'  => 'image/jpeg',
-                    'Cache-Control' => 'public, max-age=604800, immutable',
-                    'ETag'          => md5_file($cachePath),
-                ]);
+            if ((time() - filemtime($heicCache)) > $ttl) {
+                @unlink($heicCache);
+            } else {
+                generateThumbnail($heicCache, $cachePath, 320, 320, 75);
+                if (file_exists($cachePath) && filesize($cachePath) > 0) {
+                    return response()->file($cachePath, [
+                        'Content-Type'  => 'image/jpeg',
+                        'Cache-Control' => 'public, max-age=' . $ttl,
+                        'ETag'          => md5_file($cachePath),
+                    ]);
+                }
             }
         }
 
@@ -734,4 +755,107 @@ class TelegramClient
             'Access-Control-Expose-Headers' => 'Content-Disposition, Content-Type, Content-Length',
         ]);
     }
+
+    /**
+     * Prune expired thumbnail and media cache files from storage and system temp directory.
+     *
+     * @param int|null $ttl Max age in seconds (defaults to config or 7200s / 2 hours)
+     * @return array{deleted: int, bytes: int}
+     */
+    public static function pruneExpiredCache(?int $ttl = null): array
+    {
+        $ttl = $ttl ?? (int)config('services.telegram.cache_ttl', 7200);
+        $now = time();
+        $deletedCount = 0;
+        $bytesFreed = 0;
+
+        $targetDirs = [
+            storage_path('app/thumbnails'),
+            storage_path('app/heic_cache'),
+        ];
+
+        foreach ($targetDirs as $dir) {
+            if (!is_dir($dir)) continue;
+            $files = @scandir($dir) ?: [];
+            foreach ($files as $file) {
+                if ($file === '.' || $file === '..' || $file === '.gitignore') continue;
+                $fullPath = $dir . DIRECTORY_SEPARATOR . $file;
+                if (!is_file($fullPath)) continue;
+
+                $mtime = @filemtime($fullPath);
+                if ($mtime !== false && ($ttl === 0 || ($now - $mtime) >= $ttl)) {
+                    $size = @filesize($fullPath) ?: 0;
+                    if (@unlink($fullPath)) {
+                        $deletedCount++;
+                        $bytesFreed += $size;
+                    }
+                }
+            }
+        }
+
+        // Clean system temp directory for orphan MadelineProto/converter temporary files
+        $tempDir = sys_get_temp_dir();
+        $tempPatterns = ['tg_thumb_*', 'tg_doc_thumb_*', 'tg_heic_*', 'heic_thumb_*'];
+        foreach ($tempPatterns as $pattern) {
+            $tempFiles = glob($tempDir . DIRECTORY_SEPARATOR . $pattern) ?: [];
+            foreach ($tempFiles as $file) {
+                if (!is_file($file)) continue;
+                $mtime = @filemtime($file);
+                $tempTtl = $ttl === 0 ? 0 : min($ttl, 3600);
+                if ($mtime !== false && ($ttl === 0 || ($now - $mtime) >= $tempTtl)) {
+                    $size = @filesize($file) ?: 0;
+                    if (@unlink($file)) {
+                        $deletedCount++;
+                        $bytesFreed += $size;
+                    }
+                }
+            }
+        }
+
+        return [
+            'deleted' => $deletedCount,
+            'bytes'   => $bytesFreed,
+        ];
+    }
+
+    /**
+     * Opportunistic auto-prune during web requests (throttled to at most once every 30 mins).
+     */
+    public static function autoPruneIfNeeded(int $intervalSeconds = 1800): void
+    {
+        $cacheDir = storage_path('framework/cache');
+        if (!is_dir($cacheDir)) {
+            @mkdir($cacheDir, 0775, true);
+        }
+        $lockFile = $cacheDir . '/last_cache_prune.time';
+        $now = time();
+        if (file_exists($lockFile)) {
+            $lastRun = (int)@file_get_contents($lockFile);
+            if (($now - $lastRun) < $intervalSeconds) {
+                return;
+            }
+        }
+        @file_put_contents($lockFile, (string)$now);
+
+        try {
+            self::pruneExpiredCache();
+        } catch (\Throwable $e) {
+            Log::warning("Auto-prune cache error: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Register a shutdown function to auto-prune cache in the background after the response is sent.
+     */
+    public static function scheduleShutdownPrune(): void
+    {
+        static $registered = false;
+        if (!$registered) {
+            $registered = true;
+            register_shutdown_function(function () {
+                self::autoPruneIfNeeded();
+            });
+        }
+    }
 }
+
