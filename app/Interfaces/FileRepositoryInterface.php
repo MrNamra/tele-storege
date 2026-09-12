@@ -11,4 +11,5 @@ interface FileRepositoryInterface
     public function streamThumbnail(Bucket $bucket, int $messageId);
     public function deleteFiles(int|string $channel_id, array $IDs): bool;
     public function fileDownlaod($files, $chennel_id);
+    public function fileDownload($files, $channel_id);
 }

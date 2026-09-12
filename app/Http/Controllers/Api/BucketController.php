@@ -63,7 +63,25 @@ class BucketController extends Controller
     public function showBucketFile(\App\Services\Telegram\TelegramClient $telegram, Bucket $bucket, $id)
     {
         try {
-            $msgId = decryptId($id)[0];
+            // Allow public access if shared; otherwise enforce ownership
+            $isShared = $bucket->bucketShare()->exists();
+            if (!$isShared) {
+                $user = request()->user('sanctum');
+                if (!$user && request()->filled('token')) {
+                    $tokenModel = \Laravel\Sanctum\PersonalAccessToken::findToken(request()->query('token'));
+                    if ($tokenModel) {
+                        $user = $tokenModel->tokenable;
+                    }
+                }
+                if (!$user || (int)$bucket->user_id !== (int)$user->id) {
+                    abort(403, 'Unauthorized access to bucket');
+                }
+            }
+
+            $msgId = safeDecryptId($id);
+            if (!$msgId) {
+                abort(404, 'Invalid file ID');
+            }
 
             $meta = $telegram->getFileMeta(
                 channelId: $bucket->channel_id,
@@ -78,6 +96,7 @@ class BucketController extends Controller
                 'Content-Type'        => $meta['mime'],
                 'Content-Disposition' => 'inline; filename="'.$meta['filename'].'"',
                 'Accept-Ranges'       => 'bytes',
+                'Access-Control-Allow-Origin' => '*',
             ]);
         } catch (Exception $e) {
             abort(404, 'file not found');
