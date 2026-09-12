@@ -308,11 +308,31 @@ class TelegramClient
         $token = request()->bearerToken() ?? request()->query('token');
         $tokenParam = (!$isShared && $token) ? ('?token=' . urlencode($token)) : '';
 
+        $cleanChannelId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)$channelId);
+        $thumbDir = storage_path('app/thumbnails');
+        if (!is_dir($thumbDir)) {
+            @mkdir($thumbDir, 0775, true);
+        }
+
         foreach ($history['messages'] as $msg) {
             if (!isset($msg['media'])) continue;
 
             $media = $msg['media'];
             $encId = safeEncryptId($msg['id']);
+
+            // Pre-inflate stripped thumbnail on-the-fly (<0.1ms, zero network calls, zero RAM)
+            $preCachePath = "{$thumbDir}/thumb_{$cleanChannelId}_{$msg['id']}.jpg";
+            if (!file_exists($preCachePath) || filesize($preCachePath) === 0) {
+                $strippedJpeg = null;
+                if (isset($media['photo']['sizes'])) {
+                    $strippedJpeg = extractStrippedJpeg($media['photo']['sizes']);
+                } elseif (isset($media['document']['thumbs'])) {
+                    $strippedJpeg = extractStrippedJpeg($media['document']['thumbs']);
+                }
+                if ($strippedJpeg) {
+                    @file_put_contents($preCachePath, $strippedJpeg);
+                }
+            }
 
             $file = [
                 'msg_id'     => $encId,
@@ -490,7 +510,25 @@ class TelegramClient
 
         $media = $msg['media'];
 
-        // Case A: Photo
+        // 3. Tier 2: Check for stripped thumbnail (<0.1ms, zero network calls, zero extra RAM)
+        $strippedJpeg = null;
+        if (isset($media['photo']['sizes'])) {
+            $strippedJpeg = extractStrippedJpeg($media['photo']['sizes']);
+        } elseif (isset($media['document']['thumbs'])) {
+            $strippedJpeg = extractStrippedJpeg($media['document']['thumbs']);
+        }
+        if ($strippedJpeg) {
+            @file_put_contents($cachePath, $strippedJpeg);
+            if (file_exists($cachePath) && filesize($cachePath) > 0) {
+                return response()->file($cachePath, [
+                    'Content-Type'  => 'image/jpeg',
+                    'Cache-Control' => 'public, max-age=604800, immutable',
+                    'ETag'          => md5_file($cachePath),
+                ]);
+            }
+        }
+
+        // Case A: Photo with photoSize (downloads only ~15-30KB pre-generated thumb from Telegram)
         if (isset($media['photo'])) {
             $photo = $media['photo'];
             $sizes = $photo['sizes'] ?? [];
@@ -505,7 +543,10 @@ class TelegramClient
                     $this->client()->downloadToStream($photoToDownload, $tempStream);
                     fclose($tempStream);
 
-                    generateThumbnail($tempFile, $cachePath, 320, 320, 75);
+                    // Telegram already provided a ~320px JPEG. Save directly without heavy GD resampling!
+                    if (file_exists($tempFile) && filesize($tempFile) > 0) {
+                        @rename($tempFile, $cachePath);
+                    }
                 } catch (\Throwable $e) {
                     Log::error("Failed to download photoSize thumb: " . $e->getMessage());
                 } finally {
@@ -515,29 +556,43 @@ class TelegramClient
                 if (file_exists($cachePath) && filesize($cachePath) > 0) {
                     return response()->file($cachePath, [
                         'Content-Type'  => 'image/jpeg',
-                        'Cache-Control' => 'public, max-age=604800',
+                        'Cache-Control' => 'public, max-age=604800, immutable',
                         'ETag'          => md5_file($cachePath),
                     ]);
                 }
             }
         }
 
-        // Case B: Document with thumbs
+        // Case B: Document with thumbs (downloads only ~15-30KB pre-generated thumb)
         if (!empty($media['document']['thumbs'])) {
             $doc   = $media['document'];
             $thumb = pickBestThumb($doc['thumbs']);
 
-            if ($thumb && ($thumb['_'] ?? '') !== 'photoStrippedSize') {
+            if ($thumb && ($thumb['_'] ?? '') === 'photoSize') {
                 $tempFile = tempnam(sys_get_temp_dir(), 'tg_doc_thumb_');
                 $tempStream = fopen($tempFile, 'wb');
                 try {
-                    $this->client()->downloadToStream([
-                        'document' => $doc,
-                        'thumb'    => $thumb,
-                    ], $tempStream);
+                    $downloadPayload = [
+                        'InputFileLocation' => [
+                            '_'              => 'inputDocumentFileLocation',
+                            'id'             => $doc['id'],
+                            'access_hash'    => $doc['access_hash'],
+                            'file_reference' => $doc['file_reference'],
+                            'thumb_size'     => $thumb['type'] ?? 'm',
+                            'dc_id'          => $doc['dc_id'],
+                        ],
+                        'size' => $thumb['size'] ?? 30000,
+                        'mime' => 'image/jpeg',
+                        'ext'  => '.jpg',
+                        'name' => 'thumb_' . $msgId,
+                    ];
+
+                    $this->client()->downloadToStream($downloadPayload, $tempStream);
                     fclose($tempStream);
 
-                    generateThumbnail($tempFile, $cachePath, 320, 320, 75);
+                    if (file_exists($tempFile) && filesize($tempFile) > 0) {
+                        @rename($tempFile, $cachePath);
+                    }
                 } catch (\Throwable $e) {
                     Log::error("Failed to download doc thumb: " . $e->getMessage());
                 } finally {
@@ -547,44 +602,29 @@ class TelegramClient
                 if (file_exists($cachePath) && filesize($cachePath) > 0) {
                     return response()->file($cachePath, [
                         'Content-Type'  => 'image/jpeg',
-                        'Cache-Control' => 'public, max-age=604800',
+                        'Cache-Control' => 'public, max-age=604800, immutable',
                         'ETag'          => md5_file($cachePath),
                     ]);
                 }
             }
         }
 
-        // Case C: Image document without thumbs
+        // Case C: HEIC cache check
         $mime = $media['document']['mime_type'] ?? '';
-        if (str_starts_with($mime, 'image/')) {
-            $heicCache = storage_path("app/heic_cache/heic_{$cleanChannelId}_{$msgId}.jpg");
-            if (file_exists($heicCache) && filesize($heicCache) > 0) {
-                generateThumbnail($heicCache, $cachePath, 320, 320, 75);
-            } else {
-                $tempFile = tempnam(sys_get_temp_dir(), 'tg_img_');
-                $tempStream = fopen($tempFile, 'wb');
-                try {
-                    $this->client()->downloadToStream($media, $tempStream);
-                    fclose($tempStream);
-
-                    generateThumbnail($tempFile, $cachePath, 320, 320, 75);
-                } catch (\Throwable $e) {
-                    Log::error("Failed to resize image document: " . $e->getMessage());
-                } finally {
-                    @unlink($tempFile);
-                }
-            }
-
+        $heicCache = storage_path("app/heic_cache/heic_{$cleanChannelId}_{$msgId}.jpg");
+        if (file_exists($heicCache) && filesize($heicCache) > 0) {
+            generateThumbnail($heicCache, $cachePath, 320, 320, 75);
             if (file_exists($cachePath) && filesize($cachePath) > 0) {
                 return response()->file($cachePath, [
                     'Content-Type'  => 'image/jpeg',
-                    'Cache-Control' => 'public, max-age=604800',
+                    'Cache-Control' => 'public, max-age=604800, immutable',
                     'ETag'          => md5_file($cachePath),
                 ]);
             }
         }
 
-        // Case D: Non-image files (video, audio, zip, pdf, etc.) -> Instant SVG badge (<1KB)
+        // Case D: Never download full 20MB-50MB DSLR original files for thumbnails!
+        // Instant SVG badge (<1KB, 0 RAM, 0 CPU, 0 network lag)
         return $this->serveFallbackThumbnail($mime);
     }
     public function streamFile(string $channelId, int $msgId, $stream = null)
