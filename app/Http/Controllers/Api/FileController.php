@@ -283,6 +283,7 @@ class FileController extends Controller
             }
 
             // If Video (MOV, MP4, MKV, etc.), convert to faststart MP4 and serve with HTTP 206 Range support
+            $ext = $ext ?? '';
             $isVideo = str_starts_with($mime, 'video/') || in_array($ext, ['mov', 'mp4', 'm4v', 'mkv', 'webm', 'avi', '3gp', 'flv', 'wmv']);
             if ($isVideo) {
                 \App\Services\Telegram\TelegramClient::scheduleShutdownPrune();
@@ -301,16 +302,39 @@ class FileController extends Controller
                 }
 
                 if (!file_exists($cachedMp4) || filesize($cachedMp4) === 0) {
-                    $tempRaw = tempnam(sys_get_temp_dir(), 'tg_video_') . ($ext ? '.' . $ext : '');
-                    $outStream = fopen($tempRaw, 'wb');
-                    $telegram->client()->downloadToStream($media, $outStream);
-                    fclose($outStream);
+                    $lockFile = "{$cachedMp4}.lock";
+                    $lockFp = fopen($lockFile, 'c+');
+                    if ($lockFp) {
+                        @flock($lockFp, LOCK_EX);
+                        try {
+                            // Double-check if another process completed the conversion while we waited
+                            if (!file_exists($cachedMp4) || filesize($cachedMp4) === 0) {
+                                @set_time_limit(600);
+                                @ignore_user_abort(true);
 
-                    if (!convertVideoToMp4($tempRaw, $cachedMp4)) {
-                        @rename($tempRaw, $cachedMp4);
-                    } else {
-                        if (file_exists($tempRaw)) {
-                            @unlink($tempRaw);
+                                $tempRaw = tempnam(sys_get_temp_dir(), 'tg_video_') . ($ext ? '.' . $ext : '');
+                                $outStream = fopen($tempRaw, 'wb');
+                                $telegram->client()->downloadToStream($media, $outStream);
+                                fclose($outStream);
+
+                                $tempTarget = "{$cachedMp4}.tmp." . uniqid() . ".mp4";
+                                if (convertVideoToMp4($tempRaw, $tempTarget) && file_exists($tempTarget) && filesize($tempTarget) > 0) {
+                                    @rename($tempTarget, $cachedMp4);
+                                } else {
+                                    @rename($tempRaw, $cachedMp4);
+                                }
+
+                                if (file_exists($tempRaw)) {
+                                    @unlink($tempRaw);
+                                }
+                                if (file_exists($tempTarget)) {
+                                    @unlink($tempTarget);
+                                }
+                            }
+                        } finally {
+                            @flock($lockFp, LOCK_UN);
+                            @fclose($lockFp);
+                            @unlink($lockFile);
                         }
                     }
                 }

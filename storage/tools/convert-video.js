@@ -1,5 +1,6 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
+const path = require('path');
 
 let ffmpegPath = 'ffmpeg';
 try {
@@ -32,29 +33,69 @@ function runFfmpeg(args) {
 }
 
 (async () => {
+    const tempOutput = `${outputPath}.tmp.${Date.now()}.${Math.random().toString(36).substring(2, 8)}.mp4`;
     try {
-        // First try fast copy with +faststart
-        let res = await runFfmpeg(['-y', '-i', inputPath, '-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', outputPath]);
+        // Probe input codec first
+        const probeRes = await runFfmpeg(['-i', inputPath]);
+        const probeInfo = (probeRes.stderr || '').toLowerCase();
 
-        let success = res.ok && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0;
+        const isHevc = probeInfo.includes('hevc') || probeInfo.includes('h265');
+        const isH264 = (probeInfo.includes('h264') || probeInfo.includes('avc1')) && !isHevc;
+        const isAac = probeInfo.includes('aac');
 
-        // If fast copy fails or input is HEVC (iPhone default), transcode to standard H.264
-        if (!success || res.stderr.toLowerCase().includes('hevc') || res.stderr.toLowerCase().includes('h265')) {
-            if (fs.existsSync(outputPath)) {
-                try { fs.unlinkSync(outputPath); } catch (e) {}
+        let success = false;
+
+        // If already standard H.264 + AAC, fast remux in ~1 second
+        if (isH264) {
+            const copyArgs = ['-y', '-i', inputPath, '-c:v', 'copy', '-c:a', isAac ? 'copy' : 'aac', '-b:a', '128k', '-movflags', '+faststart', tempOutput];
+            const copyRes = await runFfmpeg(copyArgs);
+            if (copyRes.ok && fs.existsSync(tempOutput) && fs.statSync(tempOutput).size > 0) {
+                success = true;
             }
-            res = await runFfmpeg(['-y', '-i', inputPath, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', outputPath]);
-            success = res.ok && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0;
+        }
+
+        // If not H.264 or fast remux failed (e.g. HEVC from iPhone MOV), transcode with ultrafast preset
+        if (!success) {
+            if (fs.existsSync(tempOutput)) {
+                try { fs.unlinkSync(tempOutput); } catch (e) {}
+            }
+            const transcodeArgs = [
+                '-y',
+                '-i', inputPath,
+                '-c:v', 'libx264',
+                '-preset', 'ultrafast',
+                '-tune', 'fastdecode',
+                '-crf', '24',
+                '-pix_fmt', 'yuv420p',
+                '-c:a', 'aac',
+                '-b:a', '128k',
+                '-movflags', '+faststart',
+                tempOutput
+            ];
+            const transcodeRes = await runFfmpeg(transcodeArgs);
+            if (transcodeRes.ok && fs.existsSync(tempOutput) && fs.statSync(tempOutput).size > 0) {
+                success = true;
+            } else {
+                console.error('Transcode failed:', transcodeRes.stderr.slice(-400));
+            }
         }
 
         if (success) {
+            // Atomic rename to target path so no process reads partial file
+            fs.renameSync(tempOutput, outputPath);
             process.exit(0);
         } else {
-            console.error('Video conversion failed:', res.stderr.slice(-300));
+            if (fs.existsSync(tempOutput)) {
+                try { fs.unlinkSync(tempOutput); } catch (e) {}
+            }
             process.exit(1);
         }
     } catch (err) {
+        if (fs.existsSync(tempOutput)) {
+            try { fs.unlinkSync(tempOutput); } catch (e) {}
+        }
         console.error('convert-video uncaught error:', err);
         process.exit(1);
     }
 })();
+

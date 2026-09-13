@@ -203,6 +203,8 @@ if (!function_exists("convertVideoToMp4")) {
             return false;
         }
 
+        $tempTarget = "{$targetMp4Path}.tmp." . uniqid() . ".mp4";
+
         // Probe codec to see if fast copy can be used
         $probeCmd = escapeshellcmd($ffmpeg) . ' -i ' . escapeshellarg($sourcePath) . ' 2>&1';
         $probeOutput = (string)@shell_exec($probeCmd);
@@ -213,23 +215,32 @@ if (!function_exists("convertVideoToMp4")) {
         if ($isH264 && !$isHevc) {
             $cmdFast = escapeshellcmd($ffmpeg) . ' -y -i ' . escapeshellarg($sourcePath)
                 . ' -c:v copy -c:a aac -b:a 128k -movflags +faststart '
-                . escapeshellarg($targetMp4Path) . ' 2>&1';
+                . escapeshellarg($tempTarget) . ' 2>&1';
             exec($cmdFast, $outFast, $codeFast);
 
-            if ($codeFast === 0 && file_exists($targetMp4Path) && filesize($targetMp4Path) > 0) {
+            if ($codeFast === 0 && file_exists($tempTarget) && filesize($tempTarget) > 0) {
+                @rename($tempTarget, $targetMp4Path);
                 return true;
+            }
+            if (file_exists($tempTarget)) {
+                @unlink($tempTarget);
             }
         }
 
-        // Universal H.264 transcode with faststart
+        // Universal H.264 transcode with ultrafast preset and faststart
         $cmdTranscode = escapeshellcmd($ffmpeg) . ' -y -i ' . escapeshellarg($sourcePath)
-            . ' -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart '
-            . escapeshellarg($targetMp4Path) . ' 2>&1';
+            . ' -c:v libx264 -preset ultrafast -tune fastdecode -crf 24 -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart '
+            . escapeshellarg($tempTarget) . ' 2>&1';
 
         exec($cmdTranscode, $outTranscode, $codeTranscode);
 
-        if ($codeTranscode === 0 && file_exists($targetMp4Path) && filesize($targetMp4Path) > 0) {
+        if ($codeTranscode === 0 && file_exists($tempTarget) && filesize($tempTarget) > 0) {
+            @rename($tempTarget, $targetMp4Path);
             return true;
+        }
+
+        if (file_exists($tempTarget)) {
+            @unlink($tempTarget);
         }
 
         \Illuminate\Support\Facades\Log::warning('convertVideoToMp4 direct ffmpeg failed: ' . implode("\n", array_slice($outTranscode ?? [], -5)));
