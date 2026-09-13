@@ -772,6 +772,7 @@ class TelegramClient
         $targetDirs = [
             storage_path('app/thumbnails'),
             storage_path('app/heic_cache'),
+            storage_path('app/video_cache'),
         ];
 
         foreach ($targetDirs as $dir) {
@@ -795,7 +796,7 @@ class TelegramClient
 
         // Clean system temp directory for orphan MadelineProto/converter temporary files
         $tempDir = sys_get_temp_dir();
-        $tempPatterns = ['tg_thumb_*', 'tg_doc_thumb_*', 'tg_heic_*', 'heic_thumb_*'];
+        $tempPatterns = ['tg_thumb_*', 'tg_doc_thumb_*', 'tg_heic_*', 'heic_thumb_*', 'tg_video_*', 'video_tmp_*'];
         foreach ($tempPatterns as $pattern) {
             $tempFiles = glob($tempDir . DIRECTORY_SEPARATOR . $pattern) ?: [];
             foreach ($tempFiles as $file) {

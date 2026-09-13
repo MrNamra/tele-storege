@@ -282,6 +282,52 @@ class FileController extends Controller
                 }
             }
 
+            // If Video (MOV, MP4, MKV, etc.), convert to faststart MP4 and serve with HTTP 206 Range support
+            $isVideo = str_starts_with($mime, 'video/') || in_array($ext, ['mov', 'mp4', 'm4v', 'mkv', 'webm', 'avi', '3gp', 'flv', 'wmv']);
+            if ($isVideo) {
+                \App\Services\Telegram\TelegramClient::scheduleShutdownPrune();
+                $cleanChannel = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)$bucket->channel_id);
+                $videoCacheDir = storage_path('app/video_cache');
+                if (!is_dir($videoCacheDir)) {
+                    @mkdir($videoCacheDir, 0775, true);
+                }
+                $cachedMp4 = "{$videoCacheDir}/video_{$cleanChannel}_{$msgId}.mp4";
+                $ttl = (int)config('services.telegram.cache_ttl', 7200);
+
+                if (file_exists($cachedMp4) && filesize($cachedMp4) > 0) {
+                    if ((time() - filemtime($cachedMp4)) > $ttl) {
+                        @unlink($cachedMp4);
+                    }
+                }
+
+                if (!file_exists($cachedMp4) || filesize($cachedMp4) === 0) {
+                    $tempRaw = tempnam(sys_get_temp_dir(), 'tg_video_') . ($ext ? '.' . $ext : '');
+                    $outStream = fopen($tempRaw, 'wb');
+                    $telegram->client()->downloadToStream($media, $outStream);
+                    fclose($outStream);
+
+                    if (!convertVideoToMp4($tempRaw, $cachedMp4)) {
+                        @rename($tempRaw, $cachedMp4);
+                    } else {
+                        if (file_exists($tempRaw)) {
+                            @unlink($tempRaw);
+                        }
+                    }
+                }
+
+                if (file_exists($cachedMp4) && filesize($cachedMp4) > 0) {
+                    return response()->file($cachedMp4, [
+                        'Content-Type'                  => 'video/mp4',
+                        'Content-Disposition'           => 'inline; filename="' . pathinfo($filename, PATHINFO_FILENAME) . '.mp4"',
+                        'Cache-Control'                 => 'public, max-age=' . $ttl,
+                        'Accept-Ranges'                 => 'bytes',
+                        'Access-Control-Allow-Origin'   => '*',
+                        'Access-Control-Allow-Methods'  => 'GET, HEAD, OPTIONS',
+                        'Access-Control-Expose-Headers' => 'Content-Range, Content-Length, Accept-Ranges',
+                    ]);
+                }
+            }
+
             return response()->stream(function () use ($telegram, $media) {
                 $out = fopen('php://output', 'wb');
                 $telegram->client()->downloadToStream($media, $out);

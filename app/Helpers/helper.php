@@ -150,6 +150,93 @@ if (!function_exists("convertHeicToJpeg")) {
     }
 }
 
+if (!function_exists("getFfmpegPath")) {
+    function getFfmpegPath(): ?string
+    {
+        $bundled = base_path('storage/tools/node_modules/@ffmpeg-installer/linux-x64/ffmpeg');
+        if (file_exists($bundled) && is_executable($bundled)) {
+            return $bundled;
+        }
+
+        $system = trim((string)@shell_exec('which ffmpeg 2>/dev/null'));
+        if (!empty($system) && file_exists($system) && is_executable($system)) {
+            return $system;
+        }
+
+        try {
+            $nodeCheck = trim((string)@shell_exec('node -e "try { console.log(require(\'@ffmpeg-installer/ffmpeg\').path); } catch(e){}" 2>/dev/null'));
+            if (!empty($nodeCheck) && file_exists($nodeCheck) && is_executable($nodeCheck)) {
+                return $nodeCheck;
+            }
+        } catch (\Throwable $e) {}
+
+        return null;
+    }
+}
+
+if (!function_exists("convertVideoToMp4")) {
+    function convertVideoToMp4(string $sourcePath, string $targetMp4Path): bool
+    {
+        if (!file_exists($sourcePath) || filesize($sourcePath) === 0) {
+            return false;
+        }
+
+        $targetDir = dirname($targetMp4Path);
+        if (!is_dir($targetDir)) {
+            @mkdir($targetDir, 0775, true);
+        }
+
+        // Method 1: Use node converter script if available
+        $script = base_path('storage/tools/convert-video.js');
+        if (file_exists($script)) {
+            $cmd = 'node ' . escapeshellarg($script) . ' ' . escapeshellarg($sourcePath) . ' ' . escapeshellarg($targetMp4Path) . ' 2>&1';
+            exec($cmd, $nodeOut, $nodeCode);
+            if ($nodeCode === 0 && file_exists($targetMp4Path) && filesize($targetMp4Path) > 0) {
+                return true;
+            }
+        }
+
+        // Method 2: Direct ffmpeg binary execution
+        $ffmpeg = getFfmpegPath();
+        if (!$ffmpeg) {
+            \Illuminate\Support\Facades\Log::warning('convertVideoToMp4: ffmpeg binary not found');
+            return false;
+        }
+
+        // Probe codec to see if fast copy can be used
+        $probeCmd = escapeshellcmd($ffmpeg) . ' -i ' . escapeshellarg($sourcePath) . ' 2>&1';
+        $probeOutput = (string)@shell_exec($probeCmd);
+
+        $isHevc = (stripos($probeOutput, 'hevc') !== false || stripos($probeOutput, 'h265') !== false);
+        $isH264 = (stripos($probeOutput, 'h264') !== false || stripos($probeOutput, 'avc1') !== false);
+
+        if ($isH264 && !$isHevc) {
+            $cmdFast = escapeshellcmd($ffmpeg) . ' -y -i ' . escapeshellarg($sourcePath)
+                . ' -c:v copy -c:a aac -b:a 128k -movflags +faststart '
+                . escapeshellarg($targetMp4Path) . ' 2>&1';
+            exec($cmdFast, $outFast, $codeFast);
+
+            if ($codeFast === 0 && file_exists($targetMp4Path) && filesize($targetMp4Path) > 0) {
+                return true;
+            }
+        }
+
+        // Universal H.264 transcode with faststart
+        $cmdTranscode = escapeshellcmd($ffmpeg) . ' -y -i ' . escapeshellarg($sourcePath)
+            . ' -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart '
+            . escapeshellarg($targetMp4Path) . ' 2>&1';
+
+        exec($cmdTranscode, $outTranscode, $codeTranscode);
+
+        if ($codeTranscode === 0 && file_exists($targetMp4Path) && filesize($targetMp4Path) > 0) {
+            return true;
+        }
+
+        \Illuminate\Support\Facades\Log::warning('convertVideoToMp4 direct ffmpeg failed: ' . implode("\n", array_slice($outTranscode ?? [], -5)));
+        return false;
+    }
+}
+
 if(!function_exists("generateThumbnail")) {
     function generateThumbnail(string $sourcePath, string $targetPath, int $maxWidth = 300, int $maxHeight = 300, int $quality = 75): bool
     {
