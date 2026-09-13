@@ -4,6 +4,8 @@
     "type": "module",
     "scripts": {
         "build": "vite build",
+        "build:react": "cd storage-frontend && npm run build",
+        "build:frontend": "cd storage-frontend && npm run build",
         "dev": "vite"
     },
     "devDependencies": {

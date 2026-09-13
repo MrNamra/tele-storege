@@ -9,7 +9,10 @@ Route::get('/tg/test', function (TelegramClient $tg) {
 });
 
 Route::get('/{any?}', function () {
-    $indexPath = base_path('frontend/index.html');
+    $indexPath = public_path('index.html');
+    if (!file_exists($indexPath)) {
+        $indexPath = base_path('frontend/index.html');
+    }
     if (file_exists($indexPath)) {
         return response()->file($indexPath, [
             'Content-Type' => 'text/html; charset=UTF-8',
