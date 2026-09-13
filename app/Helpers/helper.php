@@ -108,7 +108,20 @@ if (!function_exists("extractStrippedJpeg")) {
         }
 
         foreach ($sizesOrThumbs as $item) {
-            if (($item['_'] ?? '') === 'photoStrippedSize' || ($item['type'] ?? '') === 'photoStrippedSize') {
+            if (($item['_'] ?? '') === 'photoStrippedSize' || ($item['type'] ?? '') === 'photoStrippedSize' || ($item['type'] ?? '') === 'i') {
+                if (isset($item['inflated'])) {
+                    $inflated = $item['inflated'];
+                    if (is_object($inflated) && isset($inflated->bytes)) {
+                        return (string)$inflated->bytes;
+                    }
+                    if (is_array($inflated) && isset($inflated['bytes'])) {
+                        return (string)$inflated['bytes'];
+                    }
+                    if (is_string($inflated)) {
+                        return $inflated;
+                    }
+                }
+
                 $raw = $item['bytes']['bytes'] ?? $item['bytes'] ?? null;
                 if (!empty($raw) && is_string($raw)) {
                     if (class_exists('\danog\MadelineProto\Tools')) {
