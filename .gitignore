@@ -26,3 +26,4 @@ composer.lock
 .php-cs-fixer.cache
 /storage/tools/node_modules/*
 /storage/telegram/*
+/storage-frontend
