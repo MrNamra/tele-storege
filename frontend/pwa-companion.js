@@ -1,4 +1,4 @@
-// TgStorage PWA, Web Share Target & iOS Share Sheet Companion
+// CloudVault PWA, Web Share Target & iOS Share Sheet Companion
 (function () {
   'use strict';
 
@@ -6,9 +6,9 @@
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('/sw.js').then(function (reg) {
-        console.log('[TgStorage] PWA ServiceWorker active:', reg.scope);
+        console.log('[CloudVault] PWA ServiceWorker active:', reg.scope);
       }).catch(function (err) {
-        console.warn('[TgStorage] SW registration skipped:', err);
+        console.warn('[CloudVault] SW registration skipped:', err);
       });
     });
   }
@@ -127,6 +127,11 @@
     #tg-share-pill:hover {
       transform: translateY(-1px);
       box-shadow: 0 6px 16px rgba(124, 58, 237, 0.45);
+    }
+    @media (max-width: 1024px) {
+      #tg-share-pill {
+        display: none !important;
+      }
     }
 
     /* Modal Styling */
@@ -248,8 +253,12 @@
   `;
   document.head.appendChild(style);
 
-  // 4. Create Floating "📲 Install / Share Sheet" Pill in Header
+  // 4. Create Floating "📲 Install / Share Sheet" Pill in Header (Desktop Only)
   function initHeaderPill() {
+    // Hide pill on phone / mobile screens and standalone PWA
+    if (isStandalone || window.innerWidth <= 1024 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+      return;
+    }
     if (document.getElementById('tg-share-pill')) return;
     const pill = document.createElement('button');
     pill.id = 'tg-share-pill';
@@ -281,7 +290,7 @@
       </div>
       <div class="tg-info">
         <div class="tg-title">
-          <span>Install TgStorage</span>
+          <span>Install CloudVault</span>
         </div>
         <div class="tg-desc">
           Tap <strong>Share <svg style="display:inline;vertical-align:middle;" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></svg></strong> then <strong>"Add to Home Screen"</strong> for fullscreen app & gallery uploads.
@@ -369,7 +378,7 @@
           </div>
           <div class="tg-step-body">
             <p>On Android (Chrome / Edge), when you install the PWA, it automatically registers in the <strong>Android System Share Sheet</strong>!</p>
-            <p style="margin-top: 4px; color: #94a3b8;">Simply select photos in your gallery &rarr; tap <strong>Share</strong> &rarr; pick <strong>TgStorage</strong> to upload instantly.</p>
+            <p style="margin-top: 4px; color: #94a3b8;">Simply select photos in your gallery &rarr; tap <strong>Share</strong> &rarr; pick <strong>CloudVault</strong> to upload instantly.</p>
           </div>
         </div>
 
@@ -412,7 +421,7 @@
 
     try {
       const db = await new Promise((resolve, reject) => {
-        const req = indexedDB.open('tgstorage_share_target', 1);
+        const req = indexedDB.open('cloudvault_share_target', 1);
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => reject(req.error);
       });
@@ -465,7 +474,7 @@
         });
       };
     } catch (e) {
-      console.warn('[TgStorage] Could not read shared queue:', e);
+      console.warn('[CloudVault] Could not read shared queue:', e);
     }
   }
 
@@ -481,4 +490,6 @@
     initIosBanner();
     checkSharedQueue();
   }
+
+  window.openCloudVaultGuide = openHelpModal;
 })();

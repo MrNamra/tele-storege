@@ -1,5 +1,5 @@
-// TgStorage Service Worker for PWA, Offline Caching & Web Share Target
-const CACHE_NAME = 'tgstorage-pwa-v1';
+// CloudVault Service Worker for PWA, Offline Caching & Web Share Target
+const CACHE_NAME = 'cloudvault-pwa-v1';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
@@ -11,7 +11,7 @@ const STATIC_ASSETS = [
 // Open IndexedDB to store files shared via Web Share Target
 function openShareDB() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('tgstorage_share_target', 1);
+    const request = indexedDB.open('cloudvault_share_target', 1);
     request.onupgradeneeded = (e) => {
       const db = e.target.result;
       if (!db.objectStoreNames.contains('shared_files')) {

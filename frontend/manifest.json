@@ -1,7 +1,7 @@
 {
-  "id": "tgstorage-cloud-pwa",
-  "name": "TgStorage - Unlimited Cloud Backup & Sharing",
-  "short_name": "TgStorage",
+  "id": "cloudvault-pwa",
+  "name": "CloudVault - Unlimited Cloud Storage",
+  "short_name": "CloudVault",
   "description": "Unlimited cloud storage & gallery backup powered by Telegram with instant bucket sharing.",
   "start_url": "/dashboard",
   "scope": "/",
