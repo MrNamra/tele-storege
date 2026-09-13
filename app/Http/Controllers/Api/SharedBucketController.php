@@ -62,10 +62,6 @@ class SharedBucketController extends Controller
                 return Self::errorResponse(message: 'Shared bucket not found!', status: 404);
             }
 
-            if (!empty($bucketShare->password) && $bucketShare->password !== $request->input('password')) {
-                return Self::errorResponse(message: 'Password is wrong!', status: 403);
-            }
-
             $bucket = $bucketShare->bucket;
             if (!$bucket) {
                 return Self::errorResponse(message: 'Bucket not found!', status: 404);
