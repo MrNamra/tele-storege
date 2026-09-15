@@ -19,12 +19,20 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withExceptions(function (Exceptions $exceptions): void {
 
         $exceptions->render(function (ValidationException $e, $request) {
+            if ($request->expectsJson() || $request->is('api/*')) {
+                return new ErrorResource($e->errors(), 422);
+            }
+            return back()->withErrors($e->errors())->withInput();
+        });
 
-        if ($request->expectsJson() || $request->is('api/*')) {
-            return new ErrorResource($e->errors(), 422);
-        }
-
-        return back()->withErrors($e->errors())->withInput();
-    });
+        $exceptions->render(function (\Symfony\Component\HttpKernel\Exception\NotFoundHttpException $e, $request) {
+            if ($request->expectsJson() || $request->is('api/*')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Resource or endpoint not found',
+                    'status'  => 404,
+                ], 404);
+            }
+        });
 
     })->create();

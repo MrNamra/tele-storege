@@ -48,3 +48,12 @@ Route::get('/stream/{id}', [FileController::class, 'stream'])->name('stream.file
 Route::get('/show/{code}', [SharedBucketController::class, 'index'])->name('shared.bucket-data');
 Route::post('files/upload/{code}', [SharedBucketController::class, 'uploadFile'])->name('shared.bucket-upload');
 Route::match(['get', 'post'], 'files/download/{code}/{fileId?}', [SharedBucketController::class, 'downloadFile'])->name('shared.bucket-download')->where('fileId', '.*');
+
+Route::fallback(function () {
+    return response()->json([
+        'success' => false,
+        'message' => 'API endpoint not found',
+        'status'  => 404,
+    ], 404);
+});
+
