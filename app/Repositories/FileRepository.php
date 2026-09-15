@@ -44,8 +44,8 @@ class FileRepository implements FileRepositoryInterface
 
     public function bucketData($data, Bucket $bucket): array
     {
-        $page = (int) ($data['page'] ?? 1);
-        $perPage = (int) ($data['limit'] ?? 10);
+        $page = max(1, (int) ($data['page'] ?? 1));
+        $perPage = max(1, (int) ($data['limit'] ?? 15));
 
         return $this->telegram->getChannelFiles(
             channelId: $bucket->channel_id,

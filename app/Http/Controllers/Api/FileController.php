@@ -44,8 +44,17 @@ class FileController extends Controller
     public function showBucketData(Request $request, Bucket $bucket): JsonResponse
     {
         try {
-            $data = $this->fileRepo->bucketData($request->all(), $bucket);
-            return Self::successResponse(data: $data);
+            $result = $this->fileRepo->bucketData($request->all(), $bucket);
+
+            if (isset($result['files']) && isset($result['pagination'])) {
+                return Self::successResponse(
+                    data: $result['files'],
+                    pagination: $result['pagination'],
+                    totalStorage: $result['totalStorage'] ?? 0
+                );
+            }
+
+            return Self::successResponse(data: $result);
         } catch (\Exception $e) {
             return Self::errorResponse(message: $e->getMessage());
         }

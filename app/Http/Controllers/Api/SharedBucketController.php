@@ -29,6 +29,15 @@ class SharedBucketController extends Controller
             }
 
             $response = $this->bucket->bucketData($request->all(), $bucketShare->bucket);
+
+            if (isset($response['files']) && isset($response['pagination'])) {
+                return Self::successResponse(
+                    data: $response['files'],
+                    pagination: $response['pagination'],
+                    totalStorage: $response['totalStorage'] ?? 0
+                );
+            }
+
             return Self::successResponse(data: $response);
         } catch (Exception $e) {
             return Self::errorResponse(message: $e->getMessage());

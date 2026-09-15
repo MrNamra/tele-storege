@@ -7,16 +7,23 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 
 trait ApiResponseTrait
 {
-    public function successResponse($data = [], $message = 'Fetch Successful', $status = 200): JsonResponse
+    public function successResponse($data = [], $message = 'Fetch Successful', $status = 200, $pagination = null, $totalStorage = null): JsonResponse
     {
-        return response()->json(
-            [
-                'success' => true,
-                'data' => $data,
-                'message' => $message,
-            ],
-            $status
-        );
+        $payload = [
+            'success' => true,
+            'data' => $data,
+            'message' => $message,
+        ];
+
+        if ($pagination !== null) {
+            $payload['pagination'] = $pagination;
+        }
+
+        if ($totalStorage !== null) {
+            $payload['totalStorage'] = $totalStorage;
+        }
+
+        return response()->json($payload, $status);
     }
 
     public function errorResponse($data = [], $message = 'Something want Wrong!', $status = 500): JsonResponse

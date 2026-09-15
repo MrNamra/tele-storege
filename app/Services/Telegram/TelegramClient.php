@@ -278,8 +278,22 @@ class TelegramClient
 
         return $response;
     }
-    public function getChannelFiles(string $channelId, string $bucket_id, int $page = 1, int $perPage = 20)
+    public function getChannelFiles(string $channelId, string $bucket_id, int $page = 1, int $perPage = 15): array
     {
+        $page = max(1, $page);
+        $perPage = max(1, min(100, $perPage));
+
+        $emptyResponse = [
+            'files' => [],
+            'pagination' => [
+                'currentPage' => $page,
+                'perPage'     => $perPage,
+                'totalFiles'  => 0,
+                'totalPages'  => 1,
+            ],
+            'totalStorage' => 0,
+        ];
+
         $history = null;
         try {
             $history = $this->client()->messages->getHistory(
@@ -289,14 +303,15 @@ class TelegramClient
             );
         } catch (\Throwable $e) {
             Log::warning("getChannelFiles getHistory failed for channel {$channelId}: " . $e->getMessage());
-            return [];
+            return $emptyResponse;
         }
 
         if (!$history || empty($history['messages'])) {
-            return [];
+            return $emptyResponse;
         }
 
         $files = [];
+        $totalStorageBytes = 0;
         $isShared = \App\Models\BucketShare::where('bucket_id', $bucket_id)->exists();
         $token = request()->bearerToken() ?? request()->query('token');
         $tokenParam = (!$isShared && $token) ? ('?token=' . urlencode($token)) : '';
@@ -351,6 +366,9 @@ class TelegramClient
                 if (!empty($media['photo']['sizes'])) {
                     $largest = end($media['photo']['sizes']);
                     $file['size'] = $largest['size'] ?? null;
+                    if ($file['size']) {
+                        $totalStorageBytes += (int)$file['size'];
+                    }
                 }
                 $files[] = $file;
                 continue;
@@ -363,6 +381,9 @@ class TelegramClient
                 $file['type'] = 'document';
                 $file['mime_type'] = $doc['mime_type'] ?? null;
                 $file['size'] = $doc['size'] ?? null;
+                if ($file['size']) {
+                    $totalStorageBytes += (int)$file['size'];
+                }
 
                 if (!empty($doc['attributes'])) {
                     foreach ($doc['attributes'] as $attr) {
@@ -382,7 +403,38 @@ class TelegramClient
             }
         }
 
-        return $files;
+        // Calculate pagination metadata accurately
+        $rawCount = isset($history['count']) ? (int)$history['count'] : null;
+        if ($rawCount !== null) {
+            $estimatedFiles = max(0, $rawCount - 1);
+            if ($page === 1 && count($files) < $perPage && $rawCount <= count($files) + 1) {
+                $totalFiles = count($files);
+            } else {
+                $totalFiles = max(count($files), $estimatedFiles);
+            }
+            $totalPages = $totalFiles > 0 ? (int) ceil($totalFiles / $perPage) : 1;
+        } else {
+            if (count($files) === $perPage) {
+                $totalFiles = ($page * $perPage) + 1;
+                $totalPages = $page + 1;
+            } else {
+                $totalFiles = (($page - 1) * $perPage) + count($files);
+                $totalPages = max(1, $page);
+            }
+        }
+
+        $totalStorageMB = round($totalStorageBytes / (1024 * 1024), 2);
+
+        return [
+            'files' => $files,
+            'pagination' => [
+                'currentPage' => $page,
+                'perPage'     => $perPage,
+                'totalFiles'  => $totalFiles,
+                'totalPages'  => $totalPages,
+            ],
+            'totalStorage' => $totalStorageMB,
+        ];
     }
     public function getFileMeta(int|string $channelId, int $msgId): array
     {
