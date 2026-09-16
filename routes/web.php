@@ -21,4 +21,4 @@ Route::get('/{any?}', function () {
     }
 
     return view('welcome');
-})->where('any', '^(?!api|fallback).*$');
+})->where('any', '(?!api|fallback).*');
