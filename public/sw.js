@@ -62,7 +62,17 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  const requestUrl = new URL(event.request.url);
+  let requestUrl;
+  try {
+    requestUrl = new URL(event.request.url);
+  } catch (e) {
+    return;
+  }
+
+  // Ignore non-HTTP/HTTPS schemes (e.g. chrome-extension://, data:, blob:, etc.)
+  if (!requestUrl.protocol.startsWith('http')) {
+    return;
+  }
 
   // Handle Web Share Target POST request from system share sheet
   if (requestUrl.pathname === '/share-target' && event.request.method === 'POST') {
@@ -102,8 +112,10 @@ self.addEventListener('fetch', (event) => {
           if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
             const responseClone = networkResponse.clone();
             caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseClone);
-            });
+              if (event.request.url.startsWith('http://') || event.request.url.startsWith('https://')) {
+                cache.put(event.request, responseClone).catch(() => {});
+              }
+            }).catch(() => {});
           }
           return networkResponse;
         })
