@@ -2,7 +2,7 @@
   "id": "cloudvault-pwa",
   "name": "CloudVault - Unlimited Cloud Storage",
   "short_name": "CloudVault",
-  "description": "Unlimited cloud storage & gallery backup powered by Telegram with instant bucket sharing.",
+  "description": "Unlimited cloud storage & gallery backup with instant bucket sharing.",
   "start_url": "/dashboard",
   "scope": "/",
   "display": "standalone",
@@ -64,7 +64,7 @@
     {
       "name": "Upload Media",
       "short_name": "Upload",
-      "description": "Quickly upload photos and videos to Telegram cloud",
+      "description": "Quickly upload photos and videos to cloud storage",
       "url": "/dashboard?action=upload",
       "icons": [
         {

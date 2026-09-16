@@ -447,7 +447,7 @@
             <span>Received ${totalFiles} File(s) from Gallery</span>
           </div>
           <div style="font-size:12px; color:#cbd5e1; margin-bottom:12px;">
-            Ready to upload to your Telegram cloud bucket.
+            Ready to upload to your cloud bucket.
           </div>
           <div style="display:flex; gap:8px;">
             <button id="tg-upload-shared-btn" style="flex:1; background:#7c3aed; color:#fff; border:none; border-radius:8px; padding:8px 12px; font-weight:600; font-size:12px; cursor:pointer;">
