@@ -1,5 +1,5 @@
 // CloudVault Service Worker for PWA, Offline Caching & Web Share Target
-const CACHE_NAME = 'cloudvault-pwa-v1';
+const CACHE_NAME = 'cloudvault-pwa-v2';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',

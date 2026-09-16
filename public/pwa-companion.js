@@ -6,6 +6,7 @@
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('/sw.js').then(function (reg) {
+        reg.update();
         console.log('[CloudVault] PWA ServiceWorker active:', reg.scope);
       }).catch(function (err) {
         console.warn('[CloudVault] SW registration skipped:', err);
