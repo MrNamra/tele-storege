@@ -168,4 +168,33 @@ class ChunkUploadTest extends TestCase
         // Clean up
         $this->postJson("/api/upload/cancel/{$uploadId}");
     }
+
+    public function test_shared_bucket_upload_async(): void
+    {
+        $user = User::factory()->create();
+        $bucket = Bucket::create([
+            'user_id' => $user->id,
+            'bucketName' => 'Async Shared Bucket',
+            'channel_id' => '-10099887766',
+            'access_hash' => 'hash_async',
+        ]);
+
+        $share = BucketShare::create([
+            'bucket_id' => $bucket->id,
+            'code' => 'SHORTCUT1',
+            'password' => 'pass123',
+            'expires_at' => now()->addDay(),
+        ]);
+
+        $file = UploadedFile::fake()->create('photo.jpg', 500, 'image/jpeg');
+
+        $res = $this->post('/api/files/upload/SHORTCUT1?async=1', [
+            'password' => 'pass123',
+            'files' => [$file],
+        ]);
+
+        $res->assertStatus(200);
+        $res->assertJsonPath('data.status', 'processing');
+        $this->assertNotEmpty($res->json('data.upload_ids'));
+    }
 }

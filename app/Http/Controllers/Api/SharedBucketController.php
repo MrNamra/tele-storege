@@ -9,6 +9,7 @@ use App\Models\BucketShare;
 use App\Trait\ApiResponseTrait;
 use Exception;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
 class SharedBucketController extends Controller
@@ -56,6 +57,61 @@ class SharedBucketController extends Controller
 
             if (! empty($bucketShare->password) && $bucketShare->password !== $request->password) {
                 return self::errorResponse(message: 'Password is wrong!', status: 403);
+            }
+
+            $isAsync = $request->boolean('async') || $request->header('X-Async-Upload') || $request->query('async');
+            if ($isAsync) {
+                $tempUploadDir = storage_path('app/temp_uploads');
+                if (! is_dir($tempUploadDir)) {
+                    @mkdir($tempUploadDir, 0775, true);
+                }
+
+                $uploadIds = [];
+                $files = $request->file('files');
+                if (! is_array($files)) {
+                    $files = [$files];
+                }
+
+                foreach ($files as $file) {
+                    $uploadId = bin2hex(random_bytes(16));
+                    $rawFileName = $file->getClientOriginalName();
+                    $safeFileName = preg_replace('/[^\w\.\-\(\) ]+/u', '_', basename($rawFileName));
+                    $targetPath = "{$tempUploadDir}/{$uploadId}_{$safeFileName}";
+
+                    $file->move($tempUploadDir, "{$uploadId}_{$safeFileName}");
+                    $fileSize = file_exists($targetPath) ? filesize($targetPath) : 0;
+
+                    Cache::put("chunk_upload_meta_{$uploadId}", [
+                        'upload_id' => $uploadId,
+                        'bucket_id' => $bucketShare->bucket->id,
+                        'channel_id' => $bucketShare->bucket->channel_id,
+                        'file_path' => $targetPath,
+                        'file_name' => $rawFileName,
+                        'file_size' => $fileSize,
+                    ], now()->addHours(2));
+
+                    Cache::put("chunk_upload_status_{$uploadId}", [
+                        'status' => 'processing',
+                        'progress' => 0,
+                        'message' => 'File received. Transferring to Telegram Cloud in background...',
+                        'error' => null,
+                    ], now()->addHours(2));
+
+                    $artisan = base_path('artisan');
+                    $php = PHP_BINARY ?: 'php';
+                    $cmd = escapeshellcmd($php).' '.escapeshellarg($artisan).' bucket:process-upload '.escapeshellarg($uploadId).' > /dev/null 2>&1 &';
+                    @exec($cmd);
+
+                    $uploadIds[] = $uploadId;
+                }
+
+                return self::successResponse(
+                    message: 'File(s) uploaded successfully and transferring in background',
+                    data: [
+                        'upload_ids' => $uploadIds,
+                        'status' => 'processing',
+                    ]
+                );
             }
 
             $this->bucket->fileUpload($request->file('files'), $bucketShare->bucket);
