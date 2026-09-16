@@ -11,19 +11,20 @@ class AuthRepository implements AuthRepositoryInterface
 {
     public function login(string $email, string $password)
     {
-        $user = User::firstWhere(["email" => $email]);
+        $user = User::firstWhere(['email' => $email]);
         if ($user && Hash::check($password, $user->password)) {
             $token = $user->createToken('AppToken')->plainTextToken;
+
             return [
                 'data' => [
                     'token' => $token,
                 ],
-                'message' => 'Login Successful!'
+                'message' => 'Login Successful!',
             ];
         }
 
         return [
-            'message' => 'Email and Password does not match with data'
+            'message' => 'Email and Password does not match with data',
         ];
     }
 
@@ -34,6 +35,7 @@ class AuthRepository implements AuthRepositoryInterface
             'email' => $data['email'],
             'password' => bcrypt($data['password']),
         ]);
+
         return ['message' => 'User Created successfully!'];
     }
 
@@ -46,13 +48,13 @@ class AuthRepository implements AuthRepositoryInterface
     {
         User::update(
             [
-            'id' => Auth::id()
-        ],
+                'id' => Auth::id(),
+            ],
             [
-            'name' => $data['name'],
-            'email' => $data['email'],
-            'password' => bcrypt($data['password']),
-        ]
+                'name' => $data['name'],
+                'email' => $data['email'],
+                'password' => bcrypt($data['password']),
+            ]
         );
     }
 

@@ -19,8 +19,8 @@ class LoginRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'email'    => 'required|email',
-            'password' => 'required|min:8'
+            'email' => 'required|email',
+            'password' => 'required|min:8',
         ];
     }
 
@@ -28,9 +28,9 @@ class LoginRequest extends FormRequest
     {
         return [
             'email.required' => 'Email is required',
-            'email.email'    => 'Enter a valid email address',
+            'email.email' => 'Enter a valid email address',
             'password.required' => 'Password is required',
-            'password.min'   => 'Password must be at least 8 characters'
+            'password.min' => 'Password must be at least 8 characters',
         ];
     }
 
@@ -39,7 +39,7 @@ class LoginRequest extends FormRequest
         throw new HttpResponseException(
             response()->json([
                 'success' => false,
-                'data'    => [],
+                'data' => [],
                 'message' => $validator->errors()->first(),
             ], 422)
         );

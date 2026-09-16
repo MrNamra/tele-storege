@@ -2,23 +2,33 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BucketController;
+use App\Http\Controllers\Api\ChunkUploadController;
 use App\Http\Controllers\Api\FileController;
 use App\Http\Controllers\Api\SharedBucketController;
 use Illuminate\Support\Facades\Route;
 
-Route::post('/register',[AuthController::class, 'register']);
-Route::post('/login',[AuthController::class, 'login']);
+Route::post('/register', [AuthController::class, 'register']);
+Route::post('/login', [AuthController::class, 'login']);
+
+// Resumable Chunked Upload routes
+Route::group(['prefix' => '/upload'], function () {
+    Route::post('/init', [ChunkUploadController::class, 'init']);
+    Route::post('/chunk', [ChunkUploadController::class, 'uploadChunk']);
+    Route::post('/complete', [ChunkUploadController::class, 'complete']);
+    Route::get('/status/{uploadId}', [ChunkUploadController::class, 'status']);
+    Route::post('/cancel/{uploadId}', [ChunkUploadController::class, 'cancel']);
+});
 
 Route::group(['middleware' => 'auth:sanctum'], function () {
     // user routes
-    Route::group(['prefix'=> '/user'], function () {
-        Route::get('/profile', [AuthController::class,'profile']);
-        Route::post('/profile', [AuthController::class,'updateProfile']);
-        Route::get('/dashboard', [AuthController::class,'dashboard']);
+    Route::group(['prefix' => '/user'], function () {
+        Route::get('/profile', [AuthController::class, 'profile']);
+        Route::post('/profile', [AuthController::class, 'updateProfile']);
+        Route::get('/dashboard', [AuthController::class, 'dashboard']);
     });
 
     // Bucket routes
-    Route::group(['prefix'=> '/bucket'], function () {
+    Route::group(['prefix' => '/bucket'], function () {
         Route::post('/create', [BucketController::class, 'store']);
         Route::post('/edit/{bucket}', [BucketController::class, 'update']);
         Route::post('/delete/{bucket}', [BucketController::class, 'destroy']);
@@ -26,8 +36,8 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
         Route::get('/list', [BucketController::class, 'listBuckets']);
         Route::get('/display/{bucket}', [FileController::class, 'showBucketData']);
 
-        Route::post('/share', [BucketController::class,'shareBucket']);
-        Route::post('/end-share/{code}', [BucketController::class,'endShare']);
+        Route::post('/share', [BucketController::class, 'shareBucket']);
+        Route::post('/end-share/{code}', [BucketController::class, 'endShare']);
 
         Route::post('/file/upload', [FileController::class, 'uploadFile']);
 
@@ -53,7 +63,6 @@ Route::fallback(function () {
     return response()->json([
         'success' => false,
         'message' => 'API endpoint not found',
-        'status'  => 404,
+        'status' => 404,
     ], 404);
 });
-

@@ -7,79 +7,88 @@ use App\Http\Requests\BucketRequest;
 use App\Http\Requests\ShareBucketRequest;
 use App\Interfaces\BucketRepositoryInterface;
 use App\Models\Bucket;
+use App\Services\Telegram\TelegramClient;
 use App\Trait\ApiResponseTrait;
 use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class BucketController extends Controller
 {
     use ApiResponseTrait;
+
     protected $bucketRepo;
+
     public function __construct(BucketRepositoryInterface $bucketRepo)
     {
         $this->bucketRepo = $bucketRepo;
     }
+
     public function store(BucketRequest $request): JsonResponse
     {
         try {
             if (Auth::user()->bucketAllowed < 1) {
-                return Self::errorResponse(message: 'Insufficient Bucket Bucket balance');
+                return self::errorResponse(message: 'Insufficient Bucket Bucket balance');
             }
 
             return $this->bucketRepo->store($request->all()) ?
-                Self::successResponse(message: 'Bucket Created Successfully') :
-                Self::ERRORResponse(message: 'Fail to Created Bucket');
+                self::successResponse(message: 'Bucket Created Successfully') :
+                self::ERRORResponse(message: 'Fail to Created Bucket');
         } catch (Exception $e) {
-            return Self::errorResponse(message: $e->getMessage());
+            return self::errorResponse(message: $e->getMessage());
         }
     }
+
     public function update(BucketRequest $request, Bucket $bucket): JsonResponse
     {
         try {
-            return $this->bucketRepo->update( $request->all(), $bucket)?
-                    Self::successResponse(message: 'Bucket Name Update Successfull') :
-                    Self::errorResponse(message: 'Fail to UpdateBucket Name');
+            return $this->bucketRepo->update($request->all(), $bucket) ?
+                    self::successResponse(message: 'Bucket Name Update Successfull') :
+                    self::errorResponse(message: 'Fail to UpdateBucket Name');
         } catch (Exception $e) {
-            return Self::errorResponse(message: $e->getMessage());
+            return self::errorResponse(message: $e->getMessage());
         }
     }
+
     public function destroy(Bucket $bucket): JsonResponse
     {
         try {
             return $this->bucketRepo->destroy($bucket) ?
-                    Self::successResponse(message: 'Bucket Delete Successfull'):
-                    Self::errorResponse(message: 'Bucket Fail to Delete');
+                    self::successResponse(message: 'Bucket Delete Successfull') :
+                    self::errorResponse(message: 'Bucket Fail to Delete');
         } catch (Exception $e) {
-            return Self::errorResponse(message: $e->getMessage());
+            return self::errorResponse(message: $e->getMessage());
         }
     }
+
     public function listBuckets(): JsonResponse
     {
         $data = $this->bucketRepo->listBuckets();
 
-        return Self::successResponse(data: $data);
+        return self::successResponse(data: $data);
     }
-    public function showBucketFile(\App\Services\Telegram\TelegramClient $telegram, Bucket $bucket, $id)
+
+    public function showBucketFile(TelegramClient $telegram, Bucket $bucket, $id)
     {
         try {
             // Allow public access if shared; otherwise enforce ownership
             $isShared = $bucket->bucketShare()->exists();
-            if (!$isShared) {
+            if (! $isShared) {
                 $user = request()->user('sanctum');
-                if (!$user && request()->filled('token')) {
-                    $tokenModel = \Laravel\Sanctum\PersonalAccessToken::findToken(request()->query('token'));
+                if (! $user && request()->filled('token')) {
+                    $tokenModel = PersonalAccessToken::findToken(request()->query('token'));
                     if ($tokenModel) {
                         $user = $tokenModel->tokenable;
                     }
                 }
-                if (!$user || (int)$bucket->user_id !== (int)$user->id) {
+                if (! $user || (int) $bucket->user_id !== (int) $user->id) {
                     abort(403, 'Unauthorized access to bucket');
                 }
             }
 
             $msgId = safeDecryptId($id);
-            if (!$msgId) {
+            if (! $msgId) {
                 abort(404, 'Invalid file ID');
             }
 
@@ -93,31 +102,35 @@ class BucketController extends Controller
                 $telegram->client()->downloadToStream($meta['media'], $out);
                 fclose($out);
             }, 200, [
-                'Content-Type'        => $meta['mime'],
+                'Content-Type' => $meta['mime'],
                 'Content-Disposition' => 'inline; filename="'.$meta['filename'].'"',
-                'Accept-Ranges'       => 'bytes',
+                'Accept-Ranges' => 'bytes',
                 'Access-Control-Allow-Origin' => '*',
             ]);
         } catch (Exception $e) {
             abort(404, 'file not found');
         }
     }
+
     public function shareBucket(ShareBucketRequest $request): JsonResponse
     {
         try {
             $data = $this->bucketRepo->shareBucket($request->only(['bucket_id', 'password', 'expiresAt']));
-            return Self::successResponse(data: ['code' => $data->code], message: 'Bucket Shared Successfully');
+
+            return self::successResponse(data: ['code' => $data->code], message: 'Bucket Shared Successfully');
         } catch (Exception $e) {
-            return Self::errorResponse(message: $e->getMessage());
+            return self::errorResponse(message: $e->getMessage());
         }
     }
+
     public function endShare($code): JsonResponse
     {
         try {
             $this->bucketRepo->endShare($code);
-            return Self::successResponse(message: 'Bucket Sharing ended!');
+
+            return self::successResponse(message: 'Bucket Sharing ended!');
         } catch (Exception $e) {
-            return Self::errorResponse(message: $e->getMessage());
+            return self::errorResponse(message: $e->getMessage());
         }
     }
 }

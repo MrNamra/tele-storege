@@ -9,7 +9,7 @@ class BucketShare extends Model
     protected $fillable = [
         'bucket_id',
         'password',
-        'code'
+        'code',
     ];
 
     public function bucket()

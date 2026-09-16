@@ -2,8 +2,8 @@
 
 namespace App\Console\Commands;
 
-use Illuminate\Console\Command;
 use App\Services\Telegram\TelegramClient;
+use Illuminate\Console\Command;
 
 class CleanStorageCache extends Command
 {
@@ -16,11 +16,11 @@ class CleanStorageCache extends Command
     public function handle()
     {
         $all = $this->option('all');
-        $hours = (float)$this->option('hours');
-        $ttlSeconds = $all ? 0 : (int)round($hours * 3600);
+        $hours = (float) $this->option('hours');
+        $ttlSeconds = $all ? 0 : (int) round($hours * 3600);
 
         if ($all) {
-            $this->info("Purging ALL cache files from server...");
+            $this->info('Purging ALL cache files from server...');
         } else {
             $this->info("Cleaning cache files older than {$hours} hour(s) ({$ttlSeconds} seconds)...");
         }
@@ -40,14 +40,15 @@ class CleanStorageCache extends Command
     private function formatBytes(int $bytes): string
     {
         if ($bytes >= 1073741824) {
-            return number_format($bytes / 1073741824, 2) . ' GB';
+            return number_format($bytes / 1073741824, 2).' GB';
         }
         if ($bytes >= 1048576) {
-            return number_format($bytes / 1048576, 2) . ' MB';
+            return number_format($bytes / 1048576, 2).' MB';
         }
         if ($bytes >= 1024) {
-            return number_format($bytes / 1024, 2) . ' KB';
+            return number_format($bytes / 1024, 2).' KB';
         }
-        return $bytes . ' Bytes';
+
+        return $bytes.' Bytes';
     }
 }

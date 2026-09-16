@@ -5,6 +5,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -22,15 +23,16 @@ return Application::configure(basePath: dirname(__DIR__))
             if ($request->expectsJson() || $request->is('api/*')) {
                 return new ErrorResource($e->errors(), 422);
             }
+
             return back()->withErrors($e->errors())->withInput();
         });
 
-        $exceptions->render(function (\Symfony\Component\HttpKernel\Exception\NotFoundHttpException $e, $request) {
+        $exceptions->render(function (NotFoundHttpException $e, $request) {
             if ($request->expectsJson() || $request->is('api/*')) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Resource or endpoint not found',
-                    'status'  => 404,
+                    'status' => 404,
                 ], 404);
             }
         });

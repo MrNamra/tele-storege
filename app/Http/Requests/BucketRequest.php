@@ -16,9 +16,10 @@ class BucketRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name'     => 'required|string|min:3|max:50'
+            'name' => 'required|string|min:3|max:50',
         ];
     }
+
     public function messages(): array
     {
         return [
@@ -27,6 +28,7 @@ class BucketRequest extends FormRequest
             'name.max' => 'Name should not more then 50 charaters',
         ];
     }
+
     protected function failedValidation(Validator $validator)
     {
         throw new HttpResponseException(

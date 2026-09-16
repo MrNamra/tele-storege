@@ -18,13 +18,14 @@ class BucketRepository implements BucketRepositoryInterface
     {
         $this->telegram = $telegram;
     }
+
     public function store(array $data): bool
     {
         $channel = $this->telegram->createPrivateChannel($data['name']);
         $data['channel_id'] = $channel['channel_id'];
         $data['access_hash'] = $channel['access_hash'];
 
-        Self::updateOrCreateBucket($data);
+        self::updateOrCreateBucket($data);
         Auth::user()->decrement('bucketAllowed', 1);
 
         return true;
@@ -33,9 +34,10 @@ class BucketRepository implements BucketRepositoryInterface
     public function update(array $data, Bucket $bucket): bool
     {
         $result = $this->telegram->updateChannelName($bucket->channel_id, $data['name']);
-        if($result) {
-            return Self::updateOrCreateBucket($data, $bucket);
+        if ($result) {
+            return self::updateOrCreateBucket($data, $bucket);
         }
+
         return false;
     }
 
@@ -43,13 +45,13 @@ class BucketRepository implements BucketRepositoryInterface
     {
         Bucket::updateOrCreate(
             [
-                'user_id'=> Auth::id(),
+                'user_id' => Auth::id(),
                 'id' => $bucket ? $bucket->id : null,
             ],
             [
                 'bucketName' => $data['name'],
                 'channel_id' => $data['channel_id'] ?? $bucket->channel_id,
-                'access_hash' => $data['access_hash'] ?? $bucket->access_hash
+                'access_hash' => $data['access_hash'] ?? $bucket->access_hash,
             ]
         );
 
@@ -62,7 +64,7 @@ class BucketRepository implements BucketRepositoryInterface
 
         $bucket->delete();
 
-        Auth::user()->increment('bucketAllowed',1);
+        Auth::user()->increment('bucketAllowed', 1);
 
         return true;
     }
@@ -75,26 +77,28 @@ class BucketRepository implements BucketRepositoryInterface
     public function shareBucket($request): BucketShare
     {
         $bucket = Bucket::firstWhere(['id' => $request['bucket_id'], 'user_id' => Auth::id()]);
-        if(!$bucket) {
+        if (! $bucket) {
             abort(404);
         }
 
         $sharedBucket = BucketShare::firstWhere(['bucket_id' => $bucket['id']]);
 
-        if(!$sharedBucket) {
+        if (! $sharedBucket) {
             $sharedBucket = BucketShare::create([
                 'bucket_id' => $bucket['id'],
                 'password' => $request['password'] ?? null,
-                'code' => Str::random(5)
+                'code' => Str::random(5),
             ]);
         }
+
         return $sharedBucket;
     }
+
     public function endShare($code): void
     {
         BucketShare::whereCode($code)
-        ->whereHas('bucket', fn ($q) => $q->whereUserId(Auth::id()))
-        ->with('bucket')
-        ->delete();
+            ->whereHas('bucket', fn ($q) => $q->whereUserId(Auth::id()))
+            ->with('bucket')
+            ->delete();
     }
 }

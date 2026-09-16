@@ -16,9 +16,9 @@ class ShareBucketRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'bucket_id'    => 'required',
+            'bucket_id' => 'required',
             'password' => 'nullable|min:4',
-            'expiresAt' => 'nullable|date'
+            'expiresAt' => 'nullable|date',
         ];
     }
 
@@ -26,8 +26,8 @@ class ShareBucketRequest extends FormRequest
     {
         return [
             'bucket_id.required' => 'Finding Bucket Fail',
-            'email.email'    => 'Enter a valid email address',
-            'password.min'   => 'Password must be at least 4 characters',
+            'email.email' => 'Enter a valid email address',
+            'password.min' => 'Password must be at least 4 characters',
             'expiresAt.date' => 'Expired Time Should be date',
         ];
     }
@@ -37,7 +37,7 @@ class ShareBucketRequest extends FormRequest
         throw new HttpResponseException(
             response()->json([
                 'success' => false,
-                'data'    => [],
+                'data' => [],
                 'message' => $validator->errors()->first(),
             ], 422)
         );

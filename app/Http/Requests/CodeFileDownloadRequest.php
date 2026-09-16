@@ -24,8 +24,8 @@ class CodeFileDownloadRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'password.required'   => 'Wrong Password!',
-            'password.min'   => 'Wrong Password!',
+            'password.required' => 'Wrong Password!',
+            'password.min' => 'Wrong Password!',
             'file_id.required' => 'File ID is required.',
             'file_id.string' => 'File ID must be a string.',
         ];
@@ -36,10 +36,9 @@ class CodeFileDownloadRequest extends FormRequest
         throw new HttpResponseException(
             response()->json([
                 'success' => false,
-                'data'    => [],
+                'data' => [],
                 'message' => $validator->errors()->first(),
             ], 422)
         );
     }
 }
-

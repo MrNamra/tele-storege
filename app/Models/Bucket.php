@@ -7,10 +7,10 @@ use Illuminate\Database\Eloquent\Model;
 class Bucket extends Model
 {
     protected $fillable = [
-        "user_id",
-        "bucketName",
-        "channel_id",
-        "access_hash"
+        'user_id',
+        'bucketName',
+        'channel_id',
+        'access_hash',
     ];
 
     protected $appends = ['code'];
@@ -21,7 +21,6 @@ class Bucket extends Model
     {
         return $this->belongsTo(User::class);
     }
-
 
     public function bucketShare()
     {

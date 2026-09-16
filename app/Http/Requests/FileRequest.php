@@ -11,6 +11,7 @@ use Vinkla\Hashids\Facades\Hashids;
 class FileRequest extends FormRequest
 {
     protected ?Bucket $bucket = null;
+
     public function authorize(): bool
     {
         return true;
@@ -29,8 +30,8 @@ class FileRequest extends FormRequest
                 ->where('user_id', auth()->id())
                 ->first();
 
-            if (!$bucket) {
-                throw new \Exception();
+            if (! $bucket) {
+                throw new \Exception;
             }
 
             $this->merge([
@@ -48,6 +49,7 @@ class FileRequest extends FormRequest
             );
         }
     }
+
     public function rules(): array
     {
         return [
@@ -80,6 +82,7 @@ class FileRequest extends FormRequest
             ], 422)
         );
     }
+
     public function bucket(): Bucket
     {
         return $this->bucket;

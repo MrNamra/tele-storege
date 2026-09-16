@@ -5,7 +5,6 @@ namespace App\Repositories;
 use App\Interfaces\FileRepositoryInterface;
 use App\Models\Bucket;
 use App\Services\Telegram\TelegramClient;
-use Illuminate\Support\Facades\Log;
 
 class FileRepository implements FileRepositoryInterface
 {
@@ -39,6 +38,7 @@ class FileRepository implements FileRepositoryInterface
             // fclose($stream);
             sleep(1);
         }
+
         return $results;
     }
 
@@ -68,6 +68,7 @@ class FileRepository implements FileRepositoryInterface
     public function deleteFiles(int|string $channel_id, array $IDs): bool
     {
         $this->telegram->deleteFiles(channel_id: $channel_id, IDs: $IDs);
+
         return true;
     }
 
@@ -78,7 +79,8 @@ class FileRepository implements FileRepositoryInterface
 
     public function fileDownload($files, $channel_id)
     {
-        $id = safeDecryptId($files) ?? (is_numeric($files) ? (int)$files : decrypt($files));
+        $id = safeDecryptId($files) ?? (is_numeric($files) ? (int) $files : decrypt($files));
+
         return $this->telegram->downlaodFiles($id, $channel_id);
     }
 }

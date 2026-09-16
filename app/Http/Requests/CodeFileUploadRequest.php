@@ -25,8 +25,8 @@ class CodeFileUploadRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'password.required'   => 'Wrong Password!',
-            'password.min'   => 'Wrong Password!',
+            'password.required' => 'Wrong Password!',
+            'password.min' => 'Wrong Password!',
             'files.required' => 'Please upload at least one file.',
             'files.array' => 'Files must be uploaded as an array.',
             'files.*.required' => 'Each file is required.',
@@ -40,7 +40,7 @@ class CodeFileUploadRequest extends FormRequest
         throw new HttpResponseException(
             response()->json([
                 'success' => false,
-                'data'    => [],
+                'data' => [],
                 'message' => $validator->errors()->first(),
             ], 422)
         );

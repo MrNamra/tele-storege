@@ -20,13 +20,13 @@ class RegisterRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name'     => 'required',
-            'email'    => [
+            'name' => 'required',
+            'email' => [
                 'required',
                 'email',
-                Rule::unique('users', 'email')->ignore(auth()->id())
+                Rule::unique('users', 'email')->ignore(auth()->id()),
             ],
-            'password' => 'required|min:8|confirmed'
+            'password' => 'required|min:8|confirmed',
             // password_confirmation
         ];
     }
@@ -36,10 +36,10 @@ class RegisterRequest extends FormRequest
         return [
             'name.required' => 'Name is required',
             'email.required' => 'Email is required',
-            'email.email'    => 'Enter a valid email address',
+            'email.email' => 'Enter a valid email address',
             'password.required' => 'Password is required',
-            'password.min'   => 'Password must be at least 8 characters',
-            'password.confirmed' => 'Passowrd and Confirm Password not Same'
+            'password.min' => 'Password must be at least 8 characters',
+            'password.confirmed' => 'Passowrd and Confirm Password not Same',
         ];
     }
 

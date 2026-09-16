@@ -28,10 +28,11 @@ trait ApiResponseTrait
 
     public function errorResponse($data = [], $message = 'Something want Wrong!', $status = 500): JsonResponse
     {
-        if (!env('APP_DEBUG')) {
+        if (! env('APP_DEBUG')) {
             $message = 'Something want Wrong!';
             Log::error($message);
         }
+
         return response()->json(
             [
                 'success' => false,

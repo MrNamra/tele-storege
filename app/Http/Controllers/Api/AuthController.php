@@ -20,48 +20,58 @@ class AuthController extends Controller
     {
         $this->authRepo = $authRepo;
     }
+
     public function register(RegisterRequest $request): JsonResponse
     {
         try {
             $data = $this->authRepo->register($request->all());
+
             return $this->successResponse(message: $data['message']);
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             return $this->errorResponse(message: $e->getMessage());
         }
     }
+
     public function login(LoginRequest $request): JsonResponse
     {
         try {
             $response = $this->authRepo->login(email: $request->email, password: $request->password);
-            return !empty($response['data']) ?
+
+            return ! empty($response['data']) ?
                 $this->successResponse(data: $response['data'] ?? [], message: $response['message']) :
                 $this->errorResponse(message: $response['message'], status: 422);
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             return $this->errorResponse(message: $e->getMessage());
         }
     }
+
     public function profile(): JsonResponse
     {
         try {
             $data = $this->authRepo->profile();
+
             return $this->successResponse(data: $data);
         } catch (Exception $e) {
             return $this->errorResponse(message: $e->getMessage());
         }
     }
+
     public function updateProfile(RegisterRequest $request): JsonResponse
     {
         try {
             $this->authRepo->updateProfile($request->all());
+
             return $this->successResponse(message: 'Profile Updated Successful');
         } catch (Exception $e) {
             return $this->errorResponse(message: $e->getMessage());
         }
     }
+
     public function dashboard(): JsonResponse
     {
         try {
             $data = $this->authRepo->dashboard();
+
             return $this->successResponse(data: $data);
         } catch (Exception $e) {
             return $this->errorResponse(message: $e->getMessage());
