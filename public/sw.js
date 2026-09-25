@@ -1,5 +1,9 @@
 // CloudVault Service Worker for PWA, Offline Caching & Web Share Target
-const CACHE_NAME = 'cloudvault-pwa-v4';
+const CACHE_NAME = 'cloudvault-pwa-v5';
+const DB_NAME = 'cloudvault_share_target';
+const DB_VERSION = 2;
+const STORE_NAME = 'shared_files';
+
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -17,11 +21,11 @@ const STATIC_ASSETS = [
 // Open IndexedDB to store files shared via Web Share Target
 function openShareDB() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('cloudvault_share_target', 1);
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = (e) => {
       const db = e.target.result;
-      if (!db.objectStoreNames.contains('shared_files')) {
-        db.createObjectStore('shared_files', { keyPath: 'id', autoIncrement: true });
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -29,18 +33,37 @@ function openShareDB() {
   });
 }
 
-// Store files in IndexedDB
+// Store files in IndexedDB (converting to detached ArrayBuffers so Android content URIs aren't lost)
 async function saveSharedFiles(files, title, text, url) {
   const db = await openShareDB();
+  const processedFiles = [];
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    try {
+      const buffer = await file.arrayBuffer();
+      processedFiles.push({
+        name: file.name || `shared_media_${Date.now()}_${i + 1}.jpg`,
+        type: file.type || 'image/jpeg',
+        lastModified: file.lastModified || Date.now(),
+        data: buffer,
+        size: buffer.byteLength
+      });
+    } catch (err) {
+      console.warn('[SW] Could not read file arrayBuffer, storing raw file:', err);
+      processedFiles.push(file);
+    }
+  }
+
   return new Promise((resolve, reject) => {
-    const tx = db.transaction('shared_files', 'readwrite');
-    const store = tx.objectStore('shared_files');
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
     const entry = {
       timestamp: Date.now(),
       title: title || '',
       text: text || '',
       url: url || '',
-      files: files
+      files: processedFiles
     };
     const req = store.add(entry);
     req.onsuccess = () => resolve(req.result);
@@ -102,6 +125,16 @@ self.addEventListener('fetch', (event) => {
 
           if (files && files.length > 0) {
             await saveSharedFiles(files, title, text, sharedUrl);
+
+            // Notify any open clients that shared files are ready to upload
+            try {
+              const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+              for (const client of clients) {
+                client.postMessage({ type: 'CLOUDVULT_SHARED_FILES_READY' });
+              }
+            } catch (notifyErr) {
+              console.warn('[SW] Client broadcast skipped:', notifyErr);
+            }
           }
 
           return Response.redirect('/dashboard?shared=1', 303);

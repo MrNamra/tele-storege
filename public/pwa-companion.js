@@ -256,24 +256,6 @@
       white-space: nowrap;
     }
     .tg-copy-btn:hover { background: #475569; }
-
-    /* Web Share Target Notification */
-    #tg-shared-card {
-      position: fixed;
-      top: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: #1e1b4b;
-      border: 1px solid #818cf8;
-      border-radius: 14px;
-      padding: 16px 20px;
-      color: #fff;
-      box-shadow: 0 16px 32px rgba(0, 0, 0, 0.5);
-      z-index: 1000001;
-      max-width: 440px;
-      width: calc(100% - 32px);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
   `;
   document.head.appendChild(style);
 
@@ -541,64 +523,18 @@
     }
   }
 
-  // 8. Web Share Target Queue Reader (for Android when opened via Share Target)
-  async function checkSharedQueue() {
-    if (!window.location.search.includes('shared=1')) return;
+  // 8. Web Share Target Queue Reader (notify React application)
+  function checkSharedQueue() {
+    window.dispatchEvent(new CustomEvent('cloudvault:check_shared_queue'));
+  }
 
-    try {
-      const db = await new Promise((resolve, reject) => {
-        const req = indexedDB.open('cloudvault_share_target', 1);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-      });
-
-      const tx = db.transaction('shared_files', 'readwrite');
-      const store = tx.objectStore('shared_files');
-      const getAllReq = store.getAll();
-
-      getAllReq.onsuccess = function () {
-        const items = getAllReq.result || [];
-        if (items.length === 0) return;
-
-        let totalFiles = 0;
-        items.forEach(it => { if (it.files) totalFiles += it.files.length; });
-
-        const card = document.createElement('div');
-        card.id = 'tg-shared-card';
-        card.innerHTML = `
-          <div style="font-weight:700; font-size:15px; margin-bottom:4px; display:flex; align-items:center; gap:6px;">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-            <span>Received ${totalFiles} File(s) from Gallery</span>
-          </div>
-          <div style="font-size:12px; color:#cbd5e1; margin-bottom:12px;">
-            Ready to upload to your cloud bucket.
-          </div>
-          <div style="display:flex; gap:8px;">
-            <button id="tg-upload-shared-btn" style="flex:1; background:#7c3aed; color:#fff; border:none; border-radius:8px; padding:8px 12px; font-weight:600; font-size:12px; cursor:pointer;">
-              Choose Bucket & Upload
-            </button>
-            <button id="tg-dismiss-shared-btn" style="background:#334155; color:#fff; border:none; border-radius:8px; padding:8px 12px; font-size:12px; cursor:pointer;">
-              Dismiss
-            </button>
-          </div>
-        `;
-        document.body.appendChild(card);
-
-        document.getElementById('tg-dismiss-shared-btn').addEventListener('click', () => {
-          card.remove();
-          const clearTx = db.transaction('shared_files', 'readwrite');
-          clearTx.objectStore('shared_files').clear();
-        });
-
-        document.getElementById('tg-upload-shared-btn').addEventListener('click', () => {
-          card.remove();
-          const dropzone = document.querySelector('input[type="file"]') || document.querySelector('[role="button"]');
-          if (dropzone) dropzone.scrollIntoView({ behavior: 'smooth' });
-        });
-      };
-    } catch (e) {
-      console.warn('[CloudVault] Could not read shared queue:', e);
-    }
+  // Listen for background service worker message when shared files are stored
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', function (event) {
+      if (event.data && event.data.type === 'CLOUDVULT_SHARED_FILES_READY') {
+        window.dispatchEvent(new CustomEvent('cloudvault:check_shared_queue'));
+      }
+    });
   }
 
   // Initialize after DOM is ready
