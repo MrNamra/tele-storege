@@ -110,6 +110,16 @@ class FileController extends Controller
 
     public function thumbnail(Request $request, TelegramClient $telegram, Bucket $bucket, $id)
     {
+        if ($request->isMethod('OPTIONS')) {
+            return response('', 204, [
+                'Access-Control-Allow-Origin' => '*',
+                'Access-Control-Allow-Methods' => 'GET, HEAD, OPTIONS',
+                'Access-Control-Allow-Headers' => 'Range, Authorization, Content-Type, Origin, Accept',
+                'Access-Control-Expose-Headers' => 'Content-Range, Content-Length, Accept-Ranges',
+                'Access-Control-Max-Age' => '86400',
+            ]);
+        }
+
         if (! $this->authorizeBucketAccess($bucket, $request)) {
             abort(403, 'Unauthorized access to bucket');
         }
@@ -157,6 +167,16 @@ class FileController extends Controller
 
     public function downloadFile(Request $request, $bucketId = null, $fileId = null)
     {
+        if ($request->isMethod('OPTIONS')) {
+            return response('', 204, [
+                'Access-Control-Allow-Origin' => '*',
+                'Access-Control-Allow-Methods' => 'GET, HEAD, OPTIONS',
+                'Access-Control-Allow-Headers' => 'Range, Authorization, Content-Type, Origin, Accept',
+                'Access-Control-Expose-Headers' => 'Content-Range, Content-Length, Accept-Ranges',
+                'Access-Control-Max-Age' => '86400',
+            ]);
+        }
+
         try {
             $bId = $bucketId ?? $request->input('bucket_id') ?? $request->query('bucket_id');
             $fId = $fileId ?? $request->input('file_id') ?? $request->query('file_id');
@@ -206,6 +226,16 @@ class FileController extends Controller
 
     public function streamFileSigned(Request $request, TelegramClient $telegram, Bucket $bucket, $id)
     {
+        if ($request->isMethod('OPTIONS')) {
+            return response('', 204, [
+                'Access-Control-Allow-Origin' => '*',
+                'Access-Control-Allow-Methods' => 'GET, HEAD, OPTIONS',
+                'Access-Control-Allow-Headers' => 'Range, Authorization, Content-Type, Origin, Accept',
+                'Access-Control-Expose-Headers' => 'Content-Range, Content-Length, Accept-Ranges',
+                'Access-Control-Max-Age' => '86400',
+            ]);
+        }
+
         try {
             if (! $this->authorizeBucketAccess($bucket, $request)) {
                 abort(403, 'Unauthorized access to bucket');
@@ -378,10 +408,9 @@ class FileController extends Controller
                     // Specific range: bytes=0-1048575 or bytes=0-1
                     $start = (int) $startStr;
                     $requestedEnd = (int) $endStr;
-                    $maxChunkSize = 5 * 1024 * 1024; // Limit single chunk to 5MB max
                     $end = $fileSize > 0
-                        ? min($fileSize - 1, $requestedEnd, $start + $maxChunkSize - 1)
-                        : min($requestedEnd, $start + $maxChunkSize - 1);
+                        ? min($fileSize - 1, $requestedEnd)
+                        : $requestedEnd;
                 } else {
                     $start = 0;
                     $chunkSize = 2 * 1024 * 1024;
@@ -414,12 +443,18 @@ class FileController extends Controller
 
                 return response()->stream(function () use ($telegram, $media, $start, $telegramEnd) {
                     @set_time_limit(180);
+                    @ignore_user_abort(false);
                     if (session_status() === PHP_SESSION_ACTIVE) {
                         @session_write_close();
                     }
                     $out = fopen('php://output', 'wb');
+                    $onProgress = function () {
+                        if (connection_aborted()) {
+                            throw new \RuntimeException('Client disconnected');
+                        }
+                    };
                     try {
-                        $telegram->client()->downloadToStream($media, $out, null, $start, $telegramEnd);
+                        $telegram->client()->downloadToStream($media, $out, $onProgress, $start, $telegramEnd);
                     } catch (\Throwable $e) {
                         Log::debug('Stream range chunk interrupted: '.$e->getMessage());
                     } finally {
@@ -447,12 +482,18 @@ class FileController extends Controller
 
             return response()->stream(function () use ($telegram, $media) {
                 @set_time_limit(600);
+                @ignore_user_abort(false);
                 if (session_status() === PHP_SESSION_ACTIVE) {
                     @session_write_close();
                 }
                 $out = fopen('php://output', 'wb');
+                $onProgress = function () {
+                    if (connection_aborted()) {
+                        throw new \RuntimeException('Client disconnected');
+                    }
+                };
                 try {
-                    $telegram->client()->downloadToStream($media, $out);
+                    $telegram->client()->downloadToStream($media, $out, $onProgress);
                 } catch (\Throwable $e) {
                     Log::debug('Full stream interrupted: '.$e->getMessage());
                 } finally {

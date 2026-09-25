@@ -287,4 +287,52 @@ class VideoStreamRangeTest extends TestCase
         $res = $this->get("/s/{$bucket2->id}/{$compactId}");
         $res->assertStatus(403);
     }
+
+    public function test_options_preflight_on_stream_returns_204_with_cors_headers(): void
+    {
+        $user = User::factory()->create();
+
+        $bucket = Bucket::create([
+            'user_id' => $user->id,
+            'bucketName' => 'Cors Bucket',
+            'channel_id' => '-100123456789',
+            'access_hash' => 'hash123',
+        ]);
+
+        $compactId = safeEncryptId(12345, $bucket->id);
+
+        $res = $this->call('OPTIONS', "/s/{$bucket->id}/{$compactId}");
+        $res->assertStatus(204);
+        $res->assertHeader('Access-Control-Allow-Origin', '*');
+        $res->assertHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    }
+
+    public function test_video_seeking_returns_only_target_range_without_loading_from_start(): void
+    {
+        $user = User::factory()->create();
+
+        $bucket = Bucket::create([
+            'user_id' => $user->id,
+            'bucketName' => 'Seek Bucket',
+            'channel_id' => '-100123456789',
+            'access_hash' => 'hash123',
+        ]);
+
+        // 100MB video file
+        $mockTelegram = $this->createMockTelegramClient(fileSize: 104857600);
+        $this->app->instance(TelegramClient::class, $mockTelegram);
+
+        $compactId = safeEncryptId(12345, $bucket->id);
+
+        // User seeks to ~50s (byte offset 80,000,000)
+        $res = $this->get("/s/{$bucket->id}/{$compactId}", [
+            'Range' => 'bytes=80000000-',
+        ]);
+
+        $res->assertStatus(206);
+        $res->assertHeader('Accept-Ranges', 'bytes');
+        // Chunk window of 2MB starting at 80,000,000, skipping 0-79,999,999 completely!
+        $res->assertHeader('Content-Range', 'bytes 80000000-82097151/104857600');
+        $res->assertHeader('Content-Length', '2097152');
+    }
 }

@@ -15,9 +15,9 @@ Route::match(['get', 'post'], '/share-target', function () {
 });
 
 // Short URL routes for stream, thumbnail, and download (compact, fast, zero DB)
-Route::get('/s/{bucket}/{id}', [FileController::class, 'streamFileSigned'])->name('web.stream.short')->where('id', '.*');
-Route::get('/t/{bucket}/{id}', [FileController::class, 'thumbnail'])->name('web.thumbnail.short')->where('id', '.*');
-Route::get('/d/{bucket}/{id}', [FileController::class, 'downloadFile'])->name('web.download.short')->where('id', '.*');
+Route::match(['get', 'head', 'options'], '/s/{bucket}/{id}', [FileController::class, 'streamFileSigned'])->name('web.stream.short')->where('id', '.*');
+Route::match(['get', 'head', 'options'], '/t/{bucket}/{id}', [FileController::class, 'thumbnail'])->name('web.thumbnail.short')->where('id', '.*');
+Route::match(['get', 'head', 'options'], '/d/{bucket}/{id}', [FileController::class, 'downloadFile'])->name('web.download.short')->where('id', '.*');
 
 Route::get('/{any?}', function (?string $any = null) {
     if ($any) {

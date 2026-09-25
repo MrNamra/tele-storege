@@ -65,15 +65,15 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
 });
 Route::get('/buckets/display/{bucket}/{fileId}', [BucketController::class, 'showBucketFile'])->where('fileId', '.*');
 
-Route::get('/thumbnail/{bucket}/{id}', [FileController::class, 'thumbnail'])->name('thumbnail')->where('id', '.*');
-Route::get('/stream/{bucket}/{id}', [FileController::class, 'streamFileSigned'])->name('stream.file')->where('id', '.*');
-Route::get('/stream-file/{bucket}/{id}', [FileController::class, 'streamFileSigned'])->name('stream.file.signed')->where('id', '.*');
-Route::get('/stream/{id}', [FileController::class, 'stream'])->name('stream.file.legacy')->where('id', '.*');
+Route::match(['get', 'head', 'options'], '/thumbnail/{bucket}/{id}', [FileController::class, 'thumbnail'])->name('thumbnail')->where('id', '.*');
+Route::match(['get', 'head', 'options'], '/stream/{bucket}/{id}', [FileController::class, 'streamFileSigned'])->name('stream.file')->where('id', '.*');
+Route::match(['get', 'head', 'options'], '/stream-file/{bucket}/{id}', [FileController::class, 'streamFileSigned'])->name('stream.file.signed')->where('id', '.*');
+Route::match(['get', 'head', 'options'], '/stream/{id}', [FileController::class, 'stream'])->name('stream.file.legacy')->where('id', '.*');
 
 // Short routes
-Route::get('/s/{bucket}/{id}', [FileController::class, 'streamFileSigned'])->name('api.stream.short')->where('id', '.*');
-Route::get('/t/{bucket}/{id}', [FileController::class, 'thumbnail'])->name('api.thumbnail.short')->where('id', '.*');
-Route::get('/d/{bucket}/{id}', [FileController::class, 'downloadFile'])->name('api.download.short')->where('id', '.*');
+Route::match(['get', 'head', 'options'], '/s/{bucket}/{id}', [FileController::class, 'streamFileSigned'])->name('api.stream.short')->where('id', '.*');
+Route::match(['get', 'head', 'options'], '/t/{bucket}/{id}', [FileController::class, 'thumbnail'])->name('api.thumbnail.short')->where('id', '.*');
+Route::match(['get', 'head', 'options'], '/d/{bucket}/{id}', [FileController::class, 'downloadFile'])->name('api.download.short')->where('id', '.*');
 Route::get('/show/{code}', [SharedBucketController::class, 'index'])->name('shared.bucket-data');
 Route::post('files/upload/{code}', [SharedBucketController::class, 'uploadFile'])->name('shared.bucket-upload');
 Route::match(['get', 'post'], 'files/download/{code}/{fileId?}', [SharedBucketController::class, 'downloadFile'])->name('shared.bucket-download')->where('fileId', '.*');

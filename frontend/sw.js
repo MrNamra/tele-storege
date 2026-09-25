@@ -1,5 +1,5 @@
 // CloudVault Service Worker for PWA, Offline Caching & Web Share Target
-const CACHE_NAME = 'cloudvault-pwa-v6';
+const CACHE_NAME = 'cloudvault-pwa-v7';
 const DB_NAME = 'cloudvault_share_target';
 const DB_VERSION = 2;
 const STORE_NAME = 'shared_files';
@@ -167,8 +167,19 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Allow API requests to go straight to network
-  if (requestUrl.pathname.startsWith('/api') || requestUrl.pathname.startsWith('/tg/')) {
+  // Never intercept media streams, video/audio elements, Range requests, or stream/download endpoints!
+  // Bypassing the Service Worker allows native browser byte-range seeking (HTTP 206) to work directly and instantly.
+  if (
+    event.request.headers.has('range') ||
+    event.request.destination === 'video' ||
+    event.request.destination === 'audio' ||
+    requestUrl.pathname.startsWith('/api') ||
+    requestUrl.pathname.startsWith('/tg/') ||
+    requestUrl.pathname.startsWith('/s/') ||
+    requestUrl.pathname.startsWith('/t/') ||
+    requestUrl.pathname.startsWith('/d/') ||
+    requestUrl.pathname.startsWith('/stream')
+  ) {
     return;
   }
 
