@@ -50,13 +50,17 @@ class PwaInstallabilityTest extends TestCase
 
     public function test_pwa_icons_are_served_with_image_content_type(): void
     {
-        $res192 = $this->get('/icons/icon-192.png');
+        $res192 = $this->get('/pwa-icons/icon-192.png');
         $res192->assertStatus(200);
         $res192->assertHeader('Content-Type', 'image/png');
 
-        $res512 = $this->get('/icons/icon-512.png');
+        $res512 = $this->get('/pwa-icons/icon-512.png');
         $res512->assertStatus(200);
         $res512->assertHeader('Content-Type', 'image/png');
+
+        $legacy192 = $this->get('/icons/icon-192.png');
+        $legacy192->assertStatus(200);
+        $legacy192->assertHeader('Content-Type', 'image/png');
     }
 
     public function test_share_target_route_redirects_without_csrf_error(): void

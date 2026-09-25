@@ -1,14 +1,16 @@
 // CloudVault Service Worker for PWA, Offline Caching & Web Share Target
-const CACHE_NAME = 'cloudvault-pwa-v3';
+const CACHE_NAME = 'cloudvault-pwa-v4';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
+  '/pwa-icons/icon-192.png',
+  '/pwa-icons/icon-192-maskable.png',
+  '/pwa-icons/icon-512.png',
+  '/pwa-icons/icon-512-maskable.png',
+  '/pwa-icons/apple-touch-icon.png',
   '/icons/icon-192.png',
-  '/icons/icon-192-maskable.png',
   '/icons/icon-512.png',
-  '/icons/icon-512-maskable.png',
-  '/icons/apple-touch-icon.png',
   '/pwa-companion.js'
 ];
 
