@@ -414,9 +414,22 @@ class TelegramClient
                         if ($attr['_'] === 'documentAttributeVideo') {
                             $file['type'] = 'video';
                         }
-                        if ($attr['_'] === 'documentAttributeAudio') {
+                        // Do NOT let audio overwrite video — MP4 with sound carries both attributes
+                        if ($attr['_'] === 'documentAttributeAudio' && $file['type'] !== 'video') {
                             $file['type'] = 'audio';
                         }
+                    }
+                }
+
+                // Final fallback: use MIME type when Telegram attributes didn't classify the file
+                if ($file['type'] === 'document' && ! empty($file['mime_type'])) {
+                    $mime = $file['mime_type'];
+                    if (str_starts_with($mime, 'video/')) {
+                        $file['type'] = 'video';
+                    } elseif (str_starts_with($mime, 'audio/')) {
+                        $file['type'] = 'audio';
+                    } elseif (str_starts_with($mime, 'image/')) {
+                        $file['type'] = 'photo';
                     }
                 }
 

@@ -275,7 +275,10 @@ class FileController extends Controller
 
             $media = $message['media'];
 
-            // Detect mime type and filename
+            // ?dl=1 forces browser to download rather than render inline
+            $isDownload = $request->query('dl') === '1' || $request->boolean('dl');
+            $disposition = $isDownload ? 'attachment' : 'inline';
+
             $isHeic = false;
             $fileSize = 0;
             if (isset($media['photo'])) {
@@ -332,7 +335,7 @@ class FileController extends Controller
                 if (file_exists($cachedJpeg) && filesize($cachedJpeg) > 0) {
                     return response()->file($cachedJpeg, [
                         'Content-Type' => 'image/jpeg',
-                        'Content-Disposition' => 'inline; filename="'.pathinfo($filename, PATHINFO_FILENAME).'.jpg"',
+                        'Content-Disposition' => $disposition.'; filename="'.pathinfo($filename, PATHINFO_FILENAME).'.jpg"',
                         'Cache-Control' => 'public, max-age='.$ttl,
                         'Access-Control-Allow-Origin' => '*',
                     ]);
@@ -357,7 +360,7 @@ class FileController extends Controller
                     } else {
                         return response()->file($cachedMp4, [
                             'Content-Type' => 'video/mp4',
-                            'Content-Disposition' => 'inline; filename="'.pathinfo($filename, PATHINFO_FILENAME).'.mp4"',
+                            'Content-Disposition' => $disposition.'; filename="'.pathinfo($filename, PATHINFO_FILENAME).'.mp4"',
                             'Cache-Control' => 'public, max-age='.$ttl,
                             'Accept-Ranges' => 'bytes',
                             'Access-Control-Allow-Origin' => '*',
@@ -372,7 +375,7 @@ class FileController extends Controller
             if ($request->isMethod('HEAD')) {
                 $headHeaders = [
                     'Content-Type' => $mime,
-                    'Content-Disposition' => 'inline; filename="'.addcslashes($filename, '"').'"',
+                    'Content-Disposition' => $disposition.'; filename="'.addcslashes($filename, '"').'"',
                     'Accept-Ranges' => 'bytes',
                     'Cache-Control' => 'public, max-age=86400',
                     'Access-Control-Allow-Origin' => '*',
@@ -430,7 +433,7 @@ class FileController extends Controller
 
                 $headers = [
                     'Content-Type' => $mime,
-                    'Content-Disposition' => 'inline; filename="'.addcslashes($filename, '"').'"',
+                    'Content-Disposition' => $disposition.'; filename="'.addcslashes($filename, '"').'"',
                     'Content-Range' => "bytes {$start}-{$end}/".($fileSize > 0 ? $fileSize : '*'),
                     'Content-Length' => (string) $length,
                     'Accept-Ranges' => 'bytes',
@@ -467,7 +470,7 @@ class FileController extends Controller
 
             $headers = [
                 'Content-Type' => $mime,
-                'Content-Disposition' => 'inline; filename="'.addcslashes($filename, '"').'"',
+                'Content-Disposition' => $disposition.'; filename="'.addcslashes($filename, '"').'"',
                 'Accept-Ranges' => 'bytes',
                 'Cache-Control' => 'public, max-age=86400',
                 'X-Content-Type-Options' => 'nosniff',
