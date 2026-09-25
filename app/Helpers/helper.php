@@ -16,14 +16,66 @@ if (! function_exists('decryptId')) {
         return Crypt::decryptString(base64_decode(strtr($id, '-_', '+/')));
     }
 }
-if (! function_exists('safeEncryptId')) {
-    function safeEncryptId($id)
+if (! function_exists('getShortCipherKey')) {
+    function getShortCipherKey(): string
     {
-        return rtrim(strtr(encrypt((string) $id), '+/', '-_'), '=');
+        $appKey = (string) config('app.key', 'base64:tele-storage-default-secret-key-32b=');
+
+        return substr(hash('sha256', $appKey, true), 0, 16);
     }
 }
+
+if (! function_exists('safeEncryptId')) {
+    function safeEncryptId($id, $bucketId = 0): string
+    {
+        if (empty($id)) {
+            return '';
+        }
+
+        $key = getShortCipherKey();
+        $payload = pack('NN', (int) $id, (int) $bucketId);
+        $hmac = substr(hash_hmac('sha256', $payload, $key, true), 0, 8);
+        $enc = openssl_encrypt($payload.$hmac, 'aes-128-ecb', $key, OPENSSL_NO_PADDING);
+
+        return rtrim(strtr(base64_encode($enc), '+/', '-_'), '=');
+    }
+}
+
+if (! function_exists('isCompactSignedIdForBucket')) {
+    function isCompactSignedIdForBucket(string $id, int|string $bucketId): bool
+    {
+        if (strlen($id) !== 22) {
+            return false;
+        }
+
+        $key = getShortCipherKey();
+        $b64 = strtr($id, '-_', '+/').'==';
+        $raw = base64_decode($b64, true);
+        if (! $raw || strlen($raw) !== 16) {
+            return false;
+        }
+
+        $dec = openssl_decrypt($raw, 'aes-128-ecb', $key, OPENSSL_NO_PADDING);
+        if (! $dec || strlen($dec) !== 16) {
+            return false;
+        }
+
+        $payload = substr($dec, 0, 8);
+        $hmac = substr($dec, 8, 8);
+        $expectedHmac = substr(hash_hmac('sha256', $payload, $key, true), 0, 8);
+        if (! hash_equals($expectedHmac, $hmac)) {
+            return false;
+        }
+
+        $unpacked = unpack('NmsgId/NbucketId', $payload);
+        $tokenBucketId = (int) ($unpacked['bucketId'] ?? 0);
+
+        return $tokenBucketId === (int) $bucketId || $tokenBucketId === 0;
+    }
+}
+
 if (! function_exists('safeDecryptId')) {
-    function safeDecryptId($id)
+    function safeDecryptId($id, $expectedBucketId = null)
     {
         if (empty($id)) {
             return null;
@@ -32,6 +84,35 @@ if (! function_exists('safeDecryptId')) {
             return (int) $id;
         }
 
+        // 1. Compact 22-character encrypted ID (fast, zero DB)
+        if (is_string($id) && strlen($id) === 22) {
+            $key = getShortCipherKey();
+            $b64 = strtr($id, '-_', '+/').'==';
+            $raw = base64_decode($b64, true);
+            if ($raw && strlen($raw) === 16) {
+                $dec = openssl_decrypt($raw, 'aes-128-ecb', $key, OPENSSL_NO_PADDING);
+                if ($dec && strlen($dec) === 16) {
+                    $payload = substr($dec, 0, 8);
+                    $hmac = substr($dec, 8, 8);
+                    $expectedHmac = substr(hash_hmac('sha256', $payload, $key, true), 0, 8);
+                    if (hash_equals($expectedHmac, $hmac)) {
+                        $unpacked = unpack('NmsgId/NbucketId', $payload);
+                        $msgId = (int) ($unpacked['msgId'] ?? 0);
+                        $tokenBucketId = (int) ($unpacked['bucketId'] ?? 0);
+
+                        if ($expectedBucketId !== null && $tokenBucketId !== 0 && $tokenBucketId !== (int) $expectedBucketId) {
+                            return null;
+                        }
+
+                        if ($msgId > 0) {
+                            return $msgId;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Fallback to legacy formats for 100% backward compatibility
         $candidates = [
             $id,
             strtr($id, '-_', '+/'),
@@ -43,7 +124,7 @@ if (! function_exists('safeDecryptId')) {
                 if (is_numeric($dec)) {
                     return (int) $dec;
                 }
-            } catch (Throwable $e) {
+            } catch (Throwable) {
             }
 
             try {
@@ -51,7 +132,7 @@ if (! function_exists('safeDecryptId')) {
                 if (is_numeric($dec)) {
                     return (int) $dec;
                 }
-            } catch (Throwable $e) {
+            } catch (Throwable) {
             }
 
             try {
@@ -59,7 +140,7 @@ if (! function_exists('safeDecryptId')) {
                 if (is_numeric($dec)) {
                     return (int) $dec;
                 }
-            } catch (Throwable $e) {
+            } catch (Throwable) {
             }
         }
 

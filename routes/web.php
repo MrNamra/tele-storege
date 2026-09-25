@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\FileController;
 use App\Services\Telegram\TelegramClient;
 use Illuminate\Support\Facades\Route;
 
@@ -12,6 +13,11 @@ Route::get('/tg/test', function (TelegramClient $tg) {
 Route::match(['get', 'post'], '/share-target', function () {
     return redirect('/dashboard?shared=1');
 });
+
+// Short URL routes for stream, thumbnail, and download (compact, fast, zero DB)
+Route::get('/s/{bucket}/{id}', [FileController::class, 'streamFileSigned'])->name('web.stream.short')->where('id', '.*');
+Route::get('/t/{bucket}/{id}', [FileController::class, 'thumbnail'])->name('web.thumbnail.short')->where('id', '.*');
+Route::get('/d/{bucket}/{id}', [FileController::class, 'downloadFile'])->name('web.download.short')->where('id', '.*');
 
 Route::get('/{any?}', function (?string $any = null) {
     if ($any) {

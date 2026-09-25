@@ -76,7 +76,10 @@ class TelegramClient
         }
     }
 
-    public function client(): API
+    /**
+     * @return API
+     */
+    public function client(): object
     {
         $this->ensureStarted();
         if (! $this->isLoggedIn()) {
@@ -345,7 +348,7 @@ class TelegramClient
             }
 
             $media = $msg['media'];
-            $encId = safeEncryptId($msg['id']);
+            $encId = safeEncryptId($msg['id'], (int) $bucket_id);
 
             // Pre-inflate stripped thumbnail on-the-fly (<0.1ms, zero network calls, zero RAM)
             $preCachePath = "{$thumbDir}/thumb_{$cleanChannelId}_{$msg['id']}.jpg";
@@ -371,8 +374,8 @@ class TelegramClient
                 'file_name' => null,
                 'mime_type' => null,
                 'size' => null,
-                'thumbnail' => url("/api/thumbnail/{$bucket_id}/{$encId}").$tokenParam,
-                'stream_url' => url("/api/stream/{$bucket_id}/{$encId}").$tokenParam,
+                'thumbnail' => url("/t/{$bucket_id}/{$encId}"),
+                'stream_url' => url("/s/{$bucket_id}/{$encId}"),
             ];
 
             /** PHOTO */
@@ -740,18 +743,91 @@ class TelegramClient
             abort(404, 'Unsupported media');
         }
 
-        return response()->stream(function () use ($media) {
-            $out = fopen('php://output', 'wb');
-            $this->client()->downloadToStream($media, $out);
-            fclose($out);
-        }, 200, [
+        $fileSize = (int) ($media['document']['size'] ?? 0);
+        $rangeHeader = request()->header('Range');
+        if ($rangeHeader && preg_match('/bytes=\s*(\d*)\s*-\s*(\d*)/i', $rangeHeader, $matches)) {
+            $startStr = $matches[1];
+            $endStr = $matches[2];
+
+            if ($startStr === '' && $endStr !== '') {
+                $suffix = (int) $endStr;
+                $start = $fileSize > 0 ? max(0, $fileSize - $suffix) : 0;
+                $end = $fileSize > 0 ? $fileSize - 1 : 0;
+            } elseif ($startStr !== '' && $endStr === '') {
+                $start = (int) $startStr;
+                $end = $fileSize > 0 ? $fileSize - 1 : $start;
+            } else {
+                $start = (int) $startStr;
+                $requestedEnd = (int) $endStr;
+                $end = $fileSize > 0 ? min($fileSize - 1, $requestedEnd) : $requestedEnd;
+            }
+
+            if ($fileSize > 0 && $start >= $fileSize) {
+                return response('', 416, [
+                    'Content-Range' => "bytes */{$fileSize}",
+                    'Accept-Ranges' => 'bytes',
+                ]);
+            }
+
+            $length = ($end - $start) + 1;
+            $telegramEnd = $end + 1;
+
+            return response()->stream(function () use ($media, $start, $telegramEnd) {
+                @set_time_limit(0);
+                if (session_status() === PHP_SESSION_ACTIVE) {
+                    @session_write_close();
+                }
+                $out = fopen('php://output', 'wb');
+                try {
+                    $this->client()->downloadToStream($media, $out, null, $start, $telegramEnd);
+                } catch (\Throwable $e) {
+                    Log::debug('Download range interrupted: '.$e->getMessage());
+                } finally {
+                    if (is_resource($out)) {
+                        @fclose($out);
+                    }
+                }
+            }, 206, [
+                'Content-Type' => $mime,
+                'Content-Disposition' => 'attachment; filename="'.addcslashes($filename, '"').'"; filename*=UTF-8\'\''.rawurlencode($filename),
+                'Content-Range' => "bytes {$start}-{$end}/".($fileSize > 0 ? $fileSize : '*'),
+                'Content-Length' => (string) $length,
+                'Accept-Ranges' => 'bytes',
+                'Cache-Control' => 'no-store',
+                'Access-Control-Allow-Origin' => '*',
+                'Access-Control-Expose-Headers' => 'Content-Disposition, Content-Type, Content-Length, Content-Range, Accept-Ranges',
+            ]);
+        }
+
+        $headers = [
             'Content-Type' => $mime,
             'Content-Disposition' => 'attachment; filename="'.addcslashes($filename, '"').'"; filename*=UTF-8\'\''.rawurlencode($filename),
             'Accept-Ranges' => 'bytes',
             'Cache-Control' => 'no-store',
             'Access-Control-Allow-Origin' => '*',
-            'Access-Control-Expose-Headers' => 'Content-Disposition, Content-Type, Content-Length',
-        ]);
+            'Access-Control-Expose-Headers' => 'Content-Disposition, Content-Type, Content-Length, Accept-Ranges',
+        ];
+
+        if ($fileSize > 0) {
+            $headers['Content-Length'] = (string) $fileSize;
+        }
+
+        return response()->stream(function () use ($media) {
+            @set_time_limit(0);
+            if (session_status() === PHP_SESSION_ACTIVE) {
+                @session_write_close();
+            }
+            $out = fopen('php://output', 'wb');
+            try {
+                $this->client()->downloadToStream($media, $out);
+            } catch (\Throwable $e) {
+                Log::debug('Download stream interrupted: '.$e->getMessage());
+            } finally {
+                if (is_resource($out)) {
+                    @fclose($out);
+                }
+            }
+        }, 200, $headers);
     }
 
     /**
@@ -880,7 +956,11 @@ class TelegramClient
         try {
             self::pruneExpiredCache();
         } catch (\Throwable $e) {
-            Log::warning('Auto-prune cache error: '.$e->getMessage());
+            try {
+                Log::warning('Auto-prune cache error: '.$e->getMessage());
+            } catch (\Throwable) {
+                @error_log('Auto-prune cache error: '.$e->getMessage());
+            }
         }
     }
 
@@ -889,6 +969,10 @@ class TelegramClient
      */
     public static function scheduleShutdownPrune(): void
     {
+        if (app()->runningUnitTests()) {
+            return;
+        }
+
         static $registered = false;
         if (! $registered) {
             $registered = true;

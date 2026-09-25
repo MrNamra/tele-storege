@@ -72,9 +72,9 @@ class BucketController extends Controller
     public function showBucketFile(TelegramClient $telegram, Bucket $bucket, $id)
     {
         try {
-            // Allow public access if shared; otherwise enforce ownership
+            // Allow public access if shared or compact signed token; otherwise enforce ownership
             $isShared = $bucket->bucketShare()->exists();
-            if (! $isShared) {
+            if (! $isShared && ! isCompactSignedIdForBucket((string) $id, $bucket->id)) {
                 $user = request()->user('sanctum');
                 if (! $user && request()->filled('token')) {
                     $tokenModel = PersonalAccessToken::findToken(request()->query('token'));

@@ -16,6 +16,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Laravel\Sanctum\PersonalAccessToken;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class FileController extends Controller
 {
@@ -95,6 +96,12 @@ class FileController extends Controller
         }
 
         if ($user && (int) $bucket->user_id === (int) $user->id) {
+            return true;
+        }
+
+        // 3. Compact HMAC signed media token for this bucket (zero DB, tamper-proof!)
+        $fileId = $request->route('id') ?? $request->query('file_id') ?? $request->input('file_id');
+        if ($fileId && isCompactSignedIdForBucket((string) $fileId, $bucket->id)) {
             return true;
         }
 
@@ -240,12 +247,15 @@ class FileController extends Controller
 
             // Detect mime type and filename
             $isHeic = false;
+            $fileSize = 0;
             if (isset($media['photo'])) {
                 $mime = 'image/jpeg';
                 $filename = 'photo_'.$msgId.'.jpg';
+                $fileSize = (int) ($media['photo']['size'] ?? 0);
             } elseif (isset($media['document'])) {
                 $mime = $media['document']['mime_type'] ?? 'application/octet-stream';
                 $filename = 'file_'.$msgId;
+                $fileSize = (int) ($media['document']['size'] ?? 0);
                 foreach ($media['document']['attributes'] ?? [] as $attr) {
                     if ($attr['_'] === 'documentAttributeFilename') {
                         $filename = $attr['file_name'];
@@ -299,97 +309,168 @@ class FileController extends Controller
                 }
             }
 
-            // If Video (MOV, MP4, MKV, etc.), convert to faststart MP4 and serve with HTTP 206 Range support
+            // If Video or Audio, check if pre-converted cached MP4 exists on disk
             $ext = $ext ?? '';
             $isVideo = str_starts_with($mime, 'video/') || in_array($ext, ['mov', 'mp4', 'm4v', 'mkv', 'webm', 'avi', '3gp', 'flv', 'wmv']);
+            $isAudio = str_starts_with($mime, 'audio/') || in_array($ext, ['mp3', 'm4a', 'aac', 'ogg', 'wav', 'flac', 'opus']);
+
             if ($isVideo) {
                 TelegramClient::scheduleShutdownPrune();
                 $cleanChannel = preg_replace('/[^a-zA-Z0-9_-]/', '', (string) $bucket->channel_id);
                 $videoCacheDir = storage_path('app/video_cache');
-                if (! is_dir($videoCacheDir)) {
-                    @mkdir($videoCacheDir, 0775, true);
-                }
                 $cachedMp4 = "{$videoCacheDir}/video_{$cleanChannel}_{$msgId}.mp4";
                 $ttl = (int) config('services.telegram.cache_ttl', 7200);
 
                 if (file_exists($cachedMp4) && filesize($cachedMp4) > 0) {
                     if ((time() - filemtime($cachedMp4)) > $ttl) {
                         @unlink($cachedMp4);
+                    } else {
+                        return response()->file($cachedMp4, [
+                            'Content-Type' => 'video/mp4',
+                            'Content-Disposition' => 'inline; filename="'.pathinfo($filename, PATHINFO_FILENAME).'.mp4"',
+                            'Cache-Control' => 'public, max-age='.$ttl,
+                            'Accept-Ranges' => 'bytes',
+                            'Access-Control-Allow-Origin' => '*',
+                            'Access-Control-Allow-Methods' => 'GET, HEAD, OPTIONS',
+                            'Access-Control-Expose-Headers' => 'Content-Range, Content-Length, Accept-Ranges',
+                        ]);
                     }
-                }
-
-                if (! file_exists($cachedMp4) || filesize($cachedMp4) === 0) {
-                    $lockFile = "{$cachedMp4}.lock";
-                    $lockFp = fopen($lockFile, 'c+');
-                    if ($lockFp) {
-                        @flock($lockFp, LOCK_EX);
-                        try {
-                            // Double-check if another process completed the conversion while we waited
-                            if (! file_exists($cachedMp4) || filesize($cachedMp4) === 0) {
-                                @set_time_limit(600);
-                                @ignore_user_abort(true);
-
-                                $tempRaw = tempnam(sys_get_temp_dir(), 'tg_video_').($ext ? '.'.$ext : '');
-                                $outStream = fopen($tempRaw, 'wb');
-                                $telegram->client()->downloadToStream($media, $outStream);
-                                fclose($outStream);
-
-                                $tempTarget = "{$cachedMp4}.tmp.".uniqid().'.mp4';
-                                if (convertVideoToMp4($tempRaw, $tempTarget) && file_exists($tempTarget) && filesize($tempTarget) > 0) {
-                                    @rename($tempTarget, $cachedMp4);
-                                } else {
-                                    @rename($tempRaw, $cachedMp4);
-                                }
-
-                                if (file_exists($tempRaw)) {
-                                    @unlink($tempRaw);
-                                }
-                                if (file_exists($tempTarget)) {
-                                    @unlink($tempTarget);
-                                }
-                            }
-                        } finally {
-                            @flock($lockFp, LOCK_UN);
-                            @fclose($lockFp);
-                            @unlink($lockFile);
-                        }
-                    }
-                }
-
-                if (file_exists($cachedMp4) && filesize($cachedMp4) > 0) {
-                    return response()->file($cachedMp4, [
-                        'Content-Type' => 'video/mp4',
-                        'Content-Disposition' => 'inline; filename="'.pathinfo($filename, PATHINFO_FILENAME).'.mp4"',
-                        'Cache-Control' => 'public, max-age='.$ttl,
-                        'Accept-Ranges' => 'bytes',
-                        'Access-Control-Allow-Origin' => '*',
-                        'Access-Control-Allow-Methods' => 'GET, HEAD, OPTIONS',
-                        'Access-Control-Expose-Headers' => 'Content-Range, Content-Length, Accept-Ranges',
-                    ]);
                 }
             }
 
-            return response()->stream(function () use ($telegram, $media) {
-                $out = fopen('php://output', 'wb');
-                $telegram->client()->downloadToStream($media, $out);
-                fclose($out);
-            }, 200, [
+            // Support HEAD requests for media probing
+            if ($request->isMethod('HEAD')) {
+                $headHeaders = [
+                    'Content-Type' => $mime,
+                    'Content-Disposition' => 'inline; filename="'.addcslashes($filename, '"').'"',
+                    'Accept-Ranges' => 'bytes',
+                    'Cache-Control' => 'public, max-age=86400',
+                    'Access-Control-Allow-Origin' => '*',
+                    'Access-Control-Allow-Methods' => 'GET, HEAD, OPTIONS',
+                    'Access-Control-Expose-Headers' => 'Content-Range, Content-Length, Accept-Ranges',
+                ];
+                if ($fileSize > 0) {
+                    $headHeaders['Content-Length'] = (string) $fileSize;
+                }
+
+                return response('', 200, $headHeaders);
+            }
+
+            // HTTP 206 Partial Content (Byte-Range) streaming directly from Telegram
+            // Streams in small chunks on demand so there is no need to download the full video to disk
+            $rangeHeader = $request->header('Range');
+            if ($rangeHeader && preg_match('/bytes=\s*(\d*)\s*-\s*(\d*)/i', $rangeHeader, $matches)) {
+                $startStr = $matches[1];
+                $endStr = $matches[2];
+
+                if ($startStr === '' && $endStr !== '') {
+                    // Suffix range: bytes=-524288 (last 512KB, used to read MP4 moov metadata if at end of file)
+                    $suffix = (int) $endStr;
+                    $start = $fileSize > 0 ? max(0, $fileSize - $suffix) : 0;
+                    $end = $fileSize > 0 ? $fileSize - 1 : 0;
+                } elseif ($startStr !== '' && $endStr === '') {
+                    // Open-ended range: bytes=0- or bytes=1048576-
+                    // Stream in small chunk window so it starts instantly without downloading the whole file
+                    $start = (int) $startStr;
+                    $chunkSize = 2 * 1024 * 1024; // 2MB chunk window (fast, smooth buffer)
+                    $end = $fileSize > 0 ? min($fileSize - 1, $start + $chunkSize - 1) : $start + $chunkSize - 1;
+                } elseif ($startStr !== '' && $endStr !== '') {
+                    // Specific range: bytes=0-1048575 or bytes=0-1
+                    $start = (int) $startStr;
+                    $requestedEnd = (int) $endStr;
+                    $maxChunkSize = 5 * 1024 * 1024; // Limit single chunk to 5MB max
+                    $end = $fileSize > 0
+                        ? min($fileSize - 1, $requestedEnd, $start + $maxChunkSize - 1)
+                        : min($requestedEnd, $start + $maxChunkSize - 1);
+                } else {
+                    $start = 0;
+                    $chunkSize = 2 * 1024 * 1024;
+                    $end = $fileSize > 0 ? min($fileSize - 1, $chunkSize - 1) : $chunkSize - 1;
+                }
+
+                if ($fileSize > 0 && $start >= $fileSize) {
+                    return response('', 416, [
+                        'Content-Range' => "bytes */{$fileSize}",
+                        'Accept-Ranges' => 'bytes',
+                        'Access-Control-Allow-Origin' => '*',
+                    ]);
+                }
+
+                $length = ($end - $start) + 1;
+                $telegramEnd = $end + 1; // MadelineProto uses exclusive end offset
+
+                $headers = [
+                    'Content-Type' => $mime,
+                    'Content-Disposition' => 'inline; filename="'.addcslashes($filename, '"').'"',
+                    'Content-Range' => "bytes {$start}-{$end}/".($fileSize > 0 ? $fileSize : '*'),
+                    'Content-Length' => (string) $length,
+                    'Accept-Ranges' => 'bytes',
+                    'Cache-Control' => 'public, max-age=86400',
+                    'X-Content-Type-Options' => 'nosniff',
+                    'Access-Control-Allow-Origin' => '*',
+                    'Access-Control-Allow-Methods' => 'GET, HEAD, OPTIONS',
+                    'Access-Control-Expose-Headers' => 'Content-Range, Content-Length, Accept-Ranges',
+                ];
+
+                return response()->stream(function () use ($telegram, $media, $start, $telegramEnd) {
+                    @set_time_limit(180);
+                    if (session_status() === PHP_SESSION_ACTIVE) {
+                        @session_write_close();
+                    }
+                    $out = fopen('php://output', 'wb');
+                    try {
+                        $telegram->client()->downloadToStream($media, $out, null, $start, $telegramEnd);
+                    } catch (\Throwable $e) {
+                        Log::debug('Stream range chunk interrupted: '.$e->getMessage());
+                    } finally {
+                        if (is_resource($out)) {
+                            @fclose($out);
+                        }
+                    }
+                }, 206, $headers);
+            }
+
+            $headers = [
                 'Content-Type' => $mime,
-                'Content-Disposition' => 'inline; filename="'.$filename.'"',
+                'Content-Disposition' => 'inline; filename="'.addcslashes($filename, '"').'"',
                 'Accept-Ranges' => 'bytes',
-                'Cache-Control' => 'public, max-age=3600',
+                'Cache-Control' => 'public, max-age=86400',
                 'X-Content-Type-Options' => 'nosniff',
                 'Access-Control-Allow-Origin' => '*',
                 'Access-Control-Allow-Methods' => 'GET, HEAD, OPTIONS',
-            ]);
+                'Access-Control-Expose-Headers' => 'Content-Range, Content-Length, Accept-Ranges',
+            ];
 
+            if ($fileSize > 0) {
+                $headers['Content-Length'] = (string) $fileSize;
+            }
+
+            return response()->stream(function () use ($telegram, $media) {
+                @set_time_limit(600);
+                if (session_status() === PHP_SESSION_ACTIVE) {
+                    @session_write_close();
+                }
+                $out = fopen('php://output', 'wb');
+                try {
+                    $telegram->client()->downloadToStream($media, $out);
+                } catch (\Throwable $e) {
+                    Log::debug('Full stream interrupted: '.$e->getMessage());
+                } finally {
+                    if (is_resource($out)) {
+                        @fclose($out);
+                    }
+                }
+            }, 200, $headers);
+
+        } catch (HttpException $e) {
+            throw $e;
         } catch (DecryptException $e) {
             Log::error('Decrypt error for stream: '.$e->getMessage());
             abort(404, 'Invalid file ID');
         } catch (ModelNotFoundException $e) {
             Log::error('Bucket not found for stream: '.$e->getMessage());
             abort(404, 'Bucket not found');
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('Stream file error: '.$e->getMessage());
             abort(404, 'File not found');
         }
