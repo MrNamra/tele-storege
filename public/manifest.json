@@ -1,15 +1,16 @@
 {
-  "id": "cloudvault-pwa",
+  "id": "/",
   "name": "CloudVault - Unlimited Cloud Storage",
   "short_name": "CloudVault",
   "description": "Unlimited cloud storage & gallery backup with instant bucket sharing.",
-  "start_url": "/dashboard",
+  "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
-  "display_override": ["standalone", "minimal-ui", "browser"],
+  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#0f172a",
   "theme_color": "#7c3aed",
   "orientation": "portrait-primary",
+  "prefer_related_applications": false,
   "lang": "en",
   "categories": ["productivity", "utilities", "photo"],
   "icons": [
@@ -69,7 +70,8 @@
       "icons": [
         {
           "src": "/icons/icon-192.png",
-          "sizes": "192x192"
+          "sizes": "192x192",
+          "type": "image/png"
         }
       ]
     },
@@ -81,7 +83,8 @@
       "icons": [
         {
           "src": "/icons/icon-192.png",
-          "sizes": "192x192"
+          "sizes": "192x192",
+          "type": "image/png"
         }
       ]
     }
