@@ -1,5 +1,5 @@
 // CloudVault Service Worker for PWA, Offline Caching & Web Share Target
-const CACHE_NAME = 'cloudvault-pwa-v5';
+const CACHE_NAME = 'cloudvault-pwa-v6';
 const DB_NAME = 'cloudvault_share_target';
 const DB_VERSION = 2;
 const STORE_NAME = 'shared_files';
@@ -40,11 +40,12 @@ async function saveSharedFiles(files, title, text, url) {
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
+    if (!file) continue;
     try {
       const buffer = await file.arrayBuffer();
       processedFiles.push({
         name: file.name || `shared_media_${Date.now()}_${i + 1}.jpg`,
-        type: file.type || 'image/jpeg',
+        type: file.type || 'application/octet-stream',
         lastModified: file.lastModified || Date.now(),
         data: buffer,
         size: buffer.byteLength
@@ -53,6 +54,10 @@ async function saveSharedFiles(files, title, text, url) {
       console.warn('[SW] Could not read file arrayBuffer, storing raw file:', err);
       processedFiles.push(file);
     }
+  }
+
+  if (processedFiles.length === 0) {
+    return;
   }
 
   return new Promise((resolve, reject) => {
@@ -118,7 +123,19 @@ self.addEventListener('fetch', (event) => {
       (async () => {
         try {
           const formData = await event.request.formData();
-          const files = formData.getAll('files');
+          let files = formData.getAll('files');
+          if (!files || files.length === 0) {
+            files = formData.getAll('file');
+          }
+          if (!files || files.length === 0) {
+            files = [];
+            for (const [key, value] of formData.entries()) {
+              if (value && typeof value === 'object' && ('arrayBuffer' in value || 'size' in value)) {
+                files.push(value);
+              }
+            }
+          }
+
           const title = formData.get('title');
           const text = formData.get('text');
           const sharedUrl = formData.get('url');
@@ -137,10 +154,13 @@ self.addEventListener('fetch', (event) => {
             }
           }
 
-          return Response.redirect('/dashboard?shared=1', 303);
+          // Use absolute URL for Response.redirect to avoid Fetch TypeError
+          const redirectTarget = new URL('/dashboard?shared=1', event.request.url).href;
+          return Response.redirect(redirectTarget, 303);
         } catch (err) {
           console.error('[SW] Share target processing failed:', err);
-          return Response.redirect('/dashboard', 303);
+          const fallbackTarget = new URL('/dashboard', event.request.url).href;
+          return Response.redirect(fallbackTarget, 303);
         }
       })()
     );

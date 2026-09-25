@@ -56,7 +56,13 @@
       "files": [
         {
           "name": "files",
-          "accept": ["image/*", "video/*", "*/*"]
+          "accept": [
+            "image/*",
+            "video/*",
+            "audio/*",
+            "application/*",
+            "text/*"
+          ]
         }
       ]
     }
