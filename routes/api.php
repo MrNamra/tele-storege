@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BucketController;
 use App\Http\Controllers\Api\ChunkUploadController;
@@ -46,6 +47,19 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
         Route::match(['get', 'post'], '/file/download/{bucket?}/{fileId?}', [FileController::class, 'downloadFile'])->where('fileId', '.*');
         Route::get('/file/stream', [FileController::class, 'streamFile']);
         Route::post('/file/stream', [FileController::class, 'streamFile']);
+    });
+
+    // Admin routes (requires role = admin)
+    Route::group(['prefix' => '/admin', 'middleware' => 'admin'], function () {
+        Route::get('/stats', [AdminController::class, 'stats']);
+        Route::get('/users', [AdminController::class, 'users']);
+        Route::get('/users/{user}', [AdminController::class, 'show']);
+        Route::post('/users/{user}/update', [AdminController::class, 'update']);
+        Route::put('/users/{user}', [AdminController::class, 'update']);
+        Route::post('/users/{user}/password', [AdminController::class, 'changePassword']);
+        Route::post('/users/{user}/impersonate', [AdminController::class, 'impersonate']);
+        Route::post('/users/{user}/toggle-status', [AdminController::class, 'toggleStatus']);
+        Route::delete('/users/{user}', [AdminController::class, 'destroy']);
     });
 
 });

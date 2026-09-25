@@ -13,11 +13,27 @@ class AuthRepository implements AuthRepositoryInterface
     {
         $user = User::firstWhere(['email' => $email]);
         if ($user && Hash::check($password, $user->password)) {
+            if ($user->isSuspended()) {
+                return [
+                    'message' => 'Your account has been suspended. Please contact the administrator.',
+                ];
+            }
+
+            $user->forceFill(['last_login_at' => now()])->save();
+
             $token = $user->createToken('AppToken')->plainTextToken;
 
             return [
                 'data' => [
                     'token' => $token,
+                    'user' => [
+                        'id' => $user->id,
+                        'name' => $user->name,
+                        'email' => $user->email,
+                        'role' => $user->role,
+                        'status' => $user->status,
+                        'bucketAllowed' => $user->bucketAllowed,
+                    ],
                 ],
                 'message' => 'Login Successful!',
             ];
@@ -41,7 +57,7 @@ class AuthRepository implements AuthRepositoryInterface
 
     public function profile(): array
     {
-        return Auth::user()->only(['id', 'name', 'email', 'bucketAllowed']);
+        return Auth::user()->only(['id', 'name', 'email', 'role', 'status', 'bucketAllowed', 'last_login_at']);
     }
 
     public function updateProfile(array $data): void
