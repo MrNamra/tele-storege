@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Bucket;
 use App\Models\BucketShare;
+use App\Models\UploadQueue;
 use App\Trait\ApiResponseTrait;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -290,29 +291,15 @@ class ChunkUploadController extends Controller
 
         $assembledSize = filesize($assembledPath);
 
-        // Store metadata for background processor
-        Cache::put("chunk_upload_meta_{$uploadId}", [
+        // Enqueue into sequential queue (single worker, strict FIFO order)
+        UploadQueue::enqueue([
             'upload_id' => $uploadId,
             'bucket_id' => $init['bucket_id'] ?? null,
             'channel_id' => $init['channel_id'] ?? null,
             'file_path' => $assembledPath,
             'file_name' => $rawFileName,
             'file_size' => $assembledSize,
-        ], now()->addHours(2));
-
-        // Initial progress state
-        Cache::put("chunk_upload_status_{$uploadId}", [
-            'status' => 'processing',
-            'progress' => 0,
-            'message' => 'File assembled. Transferring to Telegram Cloud in background...',
-            'error' => null,
-        ], now()->addHours(2));
-
-        // Trigger background Artisan command
-        $artisan = base_path('artisan');
-        $php = PHP_BINARY ?: 'php';
-        $cmd = escapeshellcmd($php).' '.escapeshellarg($artisan).' bucket:process-upload '.escapeshellarg($uploadId).' > /dev/null 2>&1 &';
-        @exec($cmd);
+        ]);
 
         return self::successResponse(
             message: 'File assembled successfully. Transferring to Telegram Cloud.',

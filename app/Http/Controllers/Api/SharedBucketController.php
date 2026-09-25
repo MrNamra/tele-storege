@@ -6,10 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\CodeFileUploadRequest;
 use App\Interfaces\FileRepositoryInterface;
 use App\Models\BucketShare;
+use App\Models\UploadQueue;
 use App\Trait\ApiResponseTrait;
 use Exception;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
 class SharedBucketController extends Controller
@@ -81,26 +81,14 @@ class SharedBucketController extends Controller
                     $file->move($tempUploadDir, "{$uploadId}_{$safeFileName}");
                     $fileSize = file_exists($targetPath) ? filesize($targetPath) : 0;
 
-                    Cache::put("chunk_upload_meta_{$uploadId}", [
+                    UploadQueue::enqueue([
                         'upload_id' => $uploadId,
                         'bucket_id' => $bucketShare->bucket->id,
                         'channel_id' => $bucketShare->bucket->channel_id,
                         'file_path' => $targetPath,
                         'file_name' => $rawFileName,
                         'file_size' => $fileSize,
-                    ], now()->addHours(2));
-
-                    Cache::put("chunk_upload_status_{$uploadId}", [
-                        'status' => 'processing',
-                        'progress' => 0,
-                        'message' => 'File received. Transferring to Telegram Cloud in background...',
-                        'error' => null,
-                    ], now()->addHours(2));
-
-                    $artisan = base_path('artisan');
-                    $php = PHP_BINARY ?: 'php';
-                    $cmd = escapeshellcmd($php).' '.escapeshellarg($artisan).' bucket:process-upload '.escapeshellarg($uploadId).' > /dev/null 2>&1 &';
-                    @exec($cmd);
+                    ]);
 
                     $uploadIds[] = $uploadId;
                 }

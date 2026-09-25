@@ -233,8 +233,10 @@ if (! function_exists('convertVideoToMp4')) {
         $isHevc = (stripos($probeOutput, 'hevc') !== false || stripos($probeOutput, 'h265') !== false);
         $isH264 = (stripos($probeOutput, 'h264') !== false || stripos($probeOutput, 'avc1') !== false);
 
+        $nicePrefix = (PHP_OS_FAMILY === 'Linux') ? 'nice -n 10 ' : '';
+
         if ($isH264 && ! $isHevc) {
-            $cmdFast = escapeshellcmd($ffmpeg).' -y -i '.escapeshellarg($sourcePath)
+            $cmdFast = $nicePrefix.escapeshellcmd($ffmpeg).' -y -threads 1 -i '.escapeshellarg($sourcePath)
                 .' -c:v copy -c:a aac -b:a 128k -movflags +faststart '
                 .escapeshellarg($tempTarget).' 2>&1';
             exec($cmdFast, $outFast, $codeFast);
@@ -249,8 +251,8 @@ if (! function_exists('convertVideoToMp4')) {
             }
         }
 
-        // Universal H.264 transcode with ultrafast preset and faststart
-        $cmdTranscode = escapeshellcmd($ffmpeg).' -y -i '.escapeshellarg($sourcePath)
+        // Universal H.264 transcode with ultrafast preset, 1-thread limit, and faststart
+        $cmdTranscode = $nicePrefix.escapeshellcmd($ffmpeg).' -y -threads 1 -i '.escapeshellarg($sourcePath)
             .' -c:v libx264 -preset ultrafast -tune fastdecode -crf 24 -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart '
             .escapeshellarg($tempTarget).' 2>&1';
 

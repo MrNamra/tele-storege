@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Bucket;
 use App\Models\BucketShare;
+use App\Models\UploadQueue;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -196,5 +197,45 @@ class ChunkUploadTest extends TestCase
         $res->assertStatus(200);
         $res->assertJsonPath('data.status', 'processing');
         $this->assertNotEmpty($res->json('data.upload_ids'));
+    }
+
+    public function test_multiple_async_uploads_queued_in_strict_fifo_sequence(): void
+    {
+        $user = User::factory()->create();
+        $bucket = Bucket::create([
+            'user_id' => $user->id,
+            'bucketName' => 'FIFO Bucket',
+            'channel_id' => '-10099887766',
+            'access_hash' => 'hash_fifo',
+        ]);
+
+        $share = BucketShare::create([
+            'bucket_id' => $bucket->id,
+            'code' => 'FIFO_CODE',
+            'password' => 'secret123',
+            'expires_at' => now()->addDay(),
+        ]);
+
+        for ($i = 1; $i <= 4; $i++) {
+            $file = UploadedFile::fake()->create("photo_{$i}.jpg", 200, 'image/jpeg');
+            $res = $this->post('/api/files/upload/FIFO_CODE?async=1', [
+                'password' => 'secret123',
+                'files' => [$file],
+            ]);
+            $res->assertStatus(200);
+        }
+
+        $queued = UploadQueue::where('channel_id', '-10099887766')->orderBy('id', 'asc')->get();
+        $this->assertCount(4, $queued);
+        $this->assertEquals('photo_1.jpg', $queued[0]->file_name);
+        $this->assertEquals('photo_2.jpg', $queued[1]->file_name);
+        $this->assertEquals('photo_3.jpg', $queued[2]->file_name);
+        $this->assertEquals('photo_4.jpg', $queued[3]->file_name);
+
+        foreach ($queued as $item) {
+            if (file_exists($item->file_path)) {
+                @unlink($item->file_path);
+            }
+        }
     }
 }
