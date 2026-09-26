@@ -17,7 +17,20 @@ function verifyUploadAccess(req, job) {
   const bucket = db.prepare('SELECT * FROM buckets WHERE id = ?').get(job.bucket_id);
   if (!bucket) return false;
 
-  // 1. Authenticated user who is the bucket owner, upload owner, or admin
+  // 1. If upload was initiated via a valid share link, allow access
+  if (job.share_code) {
+    const share = db.prepare('SELECT id FROM bucket_shares WHERE bucket_id = ? AND code = ?').get(bucket.id, job.share_code);
+    if (share) return true;
+  }
+
+  // 2. If client provides a valid share code matching the bucket
+  const shareCode = req.query.code || req.headers['x-bucket-code'] || (req.body && req.body.code);
+  if (shareCode) {
+    const share = db.prepare('SELECT id FROM bucket_shares WHERE bucket_id = ? AND code = ?').get(bucket.id, shareCode);
+    if (share) return true;
+  }
+
+  // 3. Authenticated user who is the bucket owner, upload initiator, or admin
   if (req.user) {
     if (
       Number(req.user.id) === Number(bucket.user_id) ||
@@ -28,11 +41,9 @@ function verifyUploadAccess(req, job) {
     }
   }
 
-  // 2. If uploaded via a shared bucket link, allow if the requester provides the valid share code
-  const shareCode = req.query.code || req.headers['x-bucket-code'] || (req.body && req.body.code);
-  if (shareCode) {
-    const share = db.prepare('SELECT id FROM bucket_shares WHERE bucket_id = ? AND code = ?').get(bucket.id, shareCode);
-    if (share) return true;
+  // 4. Anonymous upload session (shared upload without authenticated user)
+  if (!job.user_id) {
+    return true;
   }
 
   return false;
@@ -151,11 +162,12 @@ const init = async (req, res) => {
     safeMkdirSync(assembledDir);
     const assembledPath = path.join(assembledDir, `${uploadId}_${safeName}`);
     const userId = req.user ? req.user.id : null;
+    const shareCodeToStore = isShareUpload ? rawCode : (rawCode || null);
 
     db.prepare(
-      `INSERT INTO upload_queues (upload_id, bucket_id, channel_id, file_path, file_name, file_size, status, progress, user_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'uploading', 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
-    ).run(uploadId, bucket.id, bucket.channel_id, assembledPath, rawFileName, Number(rawFileSize) || 0, userId);
+      `INSERT INTO upload_queues (upload_id, bucket_id, channel_id, file_path, file_name, file_size, status, progress, user_id, share_code, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'uploading', 0, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+    ).run(uploadId, bucket.id, bucket.channel_id, assembledPath, rawFileName, Number(rawFileSize) || 0, userId, shareCodeToStore);
 
     return res.status(200).json({
       success: true,

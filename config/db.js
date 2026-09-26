@@ -89,5 +89,8 @@ db.exec(`
 try {
   db.exec('ALTER TABLE upload_queues ADD COLUMN user_id INTEGER');
 } catch {}
+try {
+  db.exec('ALTER TABLE upload_queues ADD COLUMN share_code VARCHAR');
+} catch {}
 
 module.exports = db;
