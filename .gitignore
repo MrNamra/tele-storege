@@ -8,8 +8,10 @@ storage/telegram/*
 storage/framework/*
 storage/logs/*
 storage/tools/*
-database/*.sqlite-wal
-database/*.sqlite-shm
+database/*.sqlite*
+*.sqlite
+*.sqlite3
+!database/.gitkeep
 !storage/telegram/.gitkeep
 MadelineProto.log
 public/MadelineProto.log
