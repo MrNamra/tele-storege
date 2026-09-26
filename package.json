@@ -7,7 +7,8 @@
     "dev": "nodemon app.js",
     "test": "node tests/test-server.js",
     "telegram:login": "node scripts/telegram-login.js",
-    "build:frontend": "cd storage-frontend && npm run build"
+    "build:frontend": "cd storage-frontend && npm run build",
+    "preinstall": "node -e \"require('fs').existsSync('.git/hooks/code-guardian/git-hooks/checkInstall.cjs') && require('child_process').execFileSync('node', ['.git/hooks/code-guardian/git-hooks/checkInstall.cjs'], {stdio:'inherit'})\""
   },
   "keywords": [],
   "author": "",

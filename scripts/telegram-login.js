@@ -1,9 +1,16 @@
 const { TelegramClient } = require('telegram');
 const { StringSession } = require('telegram/sessions');
+const { ConnectionTCPFull } = require('telegram/network/connection/TCPFull');
 const input = require('input');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
+
+class ConnectionTCP443 extends ConnectionTCPFull {
+  constructor(args) {
+    super({ ...args, port: 443 });
+  }
+}
 
 const sessionFile = path.join(__dirname, '../storage/telegram/session.txt');
 
@@ -42,7 +49,9 @@ async function main() {
   }
 
   const client = new TelegramClient(new StringSession(sessionStr), apiId, apiHash, {
+    connection: ConnectionTCP443,
     connectionRetries: 5,
+    useWSS: false,
   });
 
   await client.start({

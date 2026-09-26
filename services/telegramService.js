@@ -1,10 +1,19 @@
 const { TelegramClient, Api } = require('telegram');
 const { StringSession } = require('telegram/sessions');
+const { ConnectionTCPFull } = require('telegram/network/connection/TCPFull');
+const { Logger, LogLevel } = require('telegram/extensions/Logger');
 const bigInt = require('big-integer');
 const fs = require('fs');
 const path = require('path');
 const mime = require('mime-types');
 const { safeEncryptId, safeDecryptId, isCompactSignedIdForBucket } = require('../utils/crypto');
+
+// Telegram MTProto TCP connection forced to port 443 (HTTPS) to bypass ISP port 80 restrictions/blocks
+class ConnectionTCP443 extends ConnectionTCPFull {
+  constructor(args) {
+    super({ ...args, port: 443 });
+  }
+}
 
 const sessionFile = path.join(__dirname, '../storage/telegram/session.txt');
 const apiId = parseInt(process.env.TELEGRAM_API_ID === '824488511' ? '27622442' : (process.env.TELEGRAM_API_ID || '27622442'), 10);
@@ -34,35 +43,72 @@ async function getClient() {
   if (clientInstance && clientInstance.connected) {
     return clientInstance;
   }
+
   if (clientConnectingPromise) {
     return clientConnectingPromise;
   }
 
   clientConnectingPromise = (async () => {
-    const sessionStr = getSessionString();
-    const stringSession = new StringSession(sessionStr);
-
-    const client = new TelegramClient(stringSession, apiId, apiHash, {
-      connectionRetries: 5,
-      useWSS: false,
-    });
-
     try {
-      await client.connect();
-      if (!sessionStr && process.env.BOT_TOKEN) {
-        await client.start({ botAuthToken: process.env.BOT_TOKEN });
-        saveSessionString(client.session.save());
+      if (clientInstance) {
+        // Re-use existing client instance instead of leaking new ones
+        if (!clientInstance.connected) {
+          try {
+            await clientInstance.connect();
+          } catch (err) {
+            console.warn('[Telegram] Reconnect notice:', err.message);
+          }
+        }
+        return clientInstance;
       }
-    } catch (err) {
-      console.warn('[Telegram] Connect notice:', err.message);
-    }
 
-    clientInstance = client;
-    clientConnectingPromise = null;
-    return client;
+      const sessionStr = getSessionString();
+      const stringSession = new StringSession(sessionStr);
+
+      const client = new TelegramClient(stringSession, apiId, apiHash, {
+        connection: ConnectionTCP443,
+        connectionRetries: 5,
+        retryDelay: 2000,
+        autoReconnect: true,
+        useWSS: false,
+        baseLogger: new Logger(LogLevel.WARN),
+      });
+
+      client.onError = async (err) => {
+        // Suppress benign background keepalive ping timeouts
+        if (err && (err.message === 'TIMEOUT' || err.message?.includes('TIMEOUT'))) {
+          return;
+        }
+        console.warn('[Telegram Client Notice]', err?.message || err);
+      };
+
+      try {
+        await client.connect();
+        if (!sessionStr && process.env.BOT_TOKEN) {
+          await client.start({ botAuthToken: process.env.BOT_TOKEN });
+          saveSessionString(client.session.save());
+        }
+      } catch (err) {
+        console.warn('[Telegram] Connect notice:', err.message);
+      }
+
+      clientInstance = client;
+      return client;
+    } finally {
+      clientConnectingPromise = null;
+    }
   })();
 
   return clientConnectingPromise;
+}
+
+async function disconnectClient() {
+  if (clientInstance) {
+    try {
+      await clientInstance.disconnect();
+    } catch {}
+    clientInstance = null;
+  }
 }
 
 async function isAuthorized() {
@@ -323,7 +369,7 @@ function serveFallbackBadge(res, mimeType) {
   return res.end(svg);
 }
 
-// Ultra-fast memory thumbnail streaming
+// Ultra-fast thumbnail streaming with RAM + disk cache
 async function streamThumbnail(channelId, accessHash, msgId, req, res) {
   const cacheKey = `${channelId}_${msgId}`;
   if (strippedCache.has(cacheKey)) {
@@ -337,18 +383,43 @@ async function streamThumbnail(channelId, accessHash, msgId, req, res) {
     return res.end(buf);
   }
 
+  // Check persistent disk cache
+  const cleanChannel = String(channelId).replace(/[^a-zA-Z0-9_-]/g, '');
+  const thumbCacheDir = path.join(__dirname, '../storage/app/thumbnails');
+  const cacheFilePath = path.join(thumbCacheDir, `thumb_${cleanChannel}_${msgId}.jpg`);
+  if (fs.existsSync(cacheFilePath)) {
+    try {
+      const buf = fs.readFileSync(cacheFilePath);
+      if (buf.length > 0) {
+        strippedCache.set(cacheKey, buf);
+        res.writeHead(200, {
+          'Content-Type': 'image/jpeg',
+          'Content-Length': buf.length,
+          'Cache-Control': 'public, max-age=604800, immutable',
+          'Access-Control-Allow-Origin': '*',
+        });
+        return res.end(buf);
+      }
+    } catch (_) {}
+  }
+
   const msg = await getMessageById(channelId, accessHash, msgId);
   if (!msg || !msg.media) {
     return serveFallbackBadge(res, null);
   }
 
-  // Check stripped thumbnail in message
+  // 1. Check stripped thumbnail in message (<1KB instant RAM decode)
   const thumbs = (msg.photo && msg.photo.sizes) || (msg.document && msg.document.thumbs) || [];
   for (const t of thumbs) {
     if (t.className === 'PhotoStrippedSize' && t.bytes) {
       const stripped = extractStrippedJpeg(t.bytes);
       if (stripped) {
         strippedCache.set(cacheKey, stripped);
+        try {
+          if (!fs.existsSync(thumbCacheDir)) fs.mkdirSync(thumbCacheDir, { recursive: true });
+          fs.writeFileSync(cacheFilePath, stripped);
+        } catch (_) {}
+
         res.writeHead(200, {
           'Content-Type': 'image/jpeg',
           'Content-Length': stripped.length,
@@ -360,7 +431,30 @@ async function streamThumbnail(channelId, accessHash, msgId, req, res) {
     }
   }
 
-  // Fallback badge if no thumbnail available
+  // 2. Download thumbnail via Telegram client for full-fidelity thumbs
+  try {
+    const client = await getClient();
+    const thumbBuf = await client.downloadMedia(msg, { thumb: 0 });
+    if (thumbBuf && thumbBuf.length > 0) {
+      strippedCache.set(cacheKey, thumbBuf);
+      try {
+        if (!fs.existsSync(thumbCacheDir)) fs.mkdirSync(thumbCacheDir, { recursive: true });
+        fs.writeFileSync(cacheFilePath, thumbBuf);
+      } catch (_) {}
+
+      res.writeHead(200, {
+        'Content-Type': 'image/jpeg',
+        'Content-Length': thumbBuf.length,
+        'Cache-Control': 'public, max-age=604800, immutable',
+        'Access-Control-Allow-Origin': '*',
+      });
+      return res.end(thumbBuf);
+    }
+  } catch (err) {
+    console.warn(`[Thumbnail] downloadMedia notice for ${channelId}/${msgId}:`, err.message);
+  }
+
+  // 3. Fallback badge if no thumbnail available
   const mimeType = (msg.document && msg.document.mimeType) || (msg.photo ? 'image/jpeg' : null);
   return serveFallbackBadge(res, mimeType);
 }
@@ -579,6 +673,7 @@ async function deleteMessages(channelId, accessHash, msgIds) {
 
 module.exports = {
   getClient,
+  disconnectClient,
   isAuthorized,
   saveSessionString,
   createPrivateChannel,

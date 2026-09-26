@@ -6,6 +6,7 @@ require('dotenv').config();
 
 const db = require('./config/db');
 const { startQueueWorker } = require('./services/queueService');
+const telegramService = require('./services/telegramService');
 
 const authRoutes = require('./routes/auth');
 const bucketRoutes = require('./routes/bucket');
@@ -108,21 +109,19 @@ if (require.main === module) {
   });
 
   // Graceful shutdown handling
-  process.on('SIGTERM', () => {
-    console.log('SIGTERM signal received: closing HTTP server');
+  const shutdown = async (signal) => {
+    console.log(`${signal} signal received: closing server cleanly`);
+    try {
+      await telegramService.disconnectClient();
+    } catch {}
     server.close(() => {
       try { db.close(); } catch {}
       process.exit(0);
     });
-  });
+  };
 
-  process.on('SIGINT', () => {
-    console.log('SIGINT signal received: closing HTTP server');
-    server.close(() => {
-      try { db.close(); } catch {}
-      process.exit(0);
-    });
-  });
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 module.exports = app;

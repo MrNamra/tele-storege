@@ -1,5 +1,5 @@
 // CloudVault Service Worker for PWA, Offline Caching & Web Share Target
-const CACHE_NAME = 'cloudvault-pwa-v7';
+const CACHE_NAME = 'cloudvault-pwa-v8';
 const DB_NAME = 'cloudvault_share_target';
 const DB_VERSION = 2;
 const STORE_NAME = 'shared_files';
