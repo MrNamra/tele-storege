@@ -1,9 +1,31 @@
-const {jwtAuthMiddleware} = require('../middleware/AuthMiddleware')
-const fileController = require('../controller/FileController')
-const express = require('express')
-const router = express.Router()
+const express = require('express');
+const router = express.Router();
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 
-router.post('/upload', jwtAuthMiddleware, fileController.uploadFile)
-router.delete('/delete', jwtAuthMiddleware, fileController.deleteFile)
+const tmpDir = path.join(__dirname, '../storage/app/tmp');
+if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
 
-module.exports = router
+const upload = multer({ dest: tmpDir });
+
+const FileController = require('../controller/FileController');
+const { optionalAuthMiddleware } = require('../middleware/AuthMiddleware');
+
+// Shared Bucket endpoints
+router.get('/show/:code', optionalAuthMiddleware, FileController.showSharedBucket);
+router.post('/files/upload/:code', upload.array('files'), FileController.uploadToSharedBucket);
+router.all('/files/download/:code/:fileId?', optionalAuthMiddleware, FileController.downloadFromSharedBucket);
+
+// Direct Media Streaming, Thumbnails & Downloads
+router.all('/s/:bucket/:id', optionalAuthMiddleware, FileController.streamFile);
+router.all('/stream/:bucket/:id', optionalAuthMiddleware, FileController.streamFile);
+router.all('/stream-file/:bucket/:id', optionalAuthMiddleware, FileController.streamFile);
+router.all('/stream/:id', optionalAuthMiddleware, FileController.streamFile);
+
+router.all('/t/:bucket/:id', optionalAuthMiddleware, FileController.streamThumbnail);
+router.all('/thumbnail/:bucket/:id', optionalAuthMiddleware, FileController.streamThumbnail);
+
+router.all('/d/:bucket/:id', optionalAuthMiddleware, FileController.downloadFile);
+
+module.exports = router;
