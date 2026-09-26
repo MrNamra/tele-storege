@@ -6,7 +6,7 @@ const mime = require('mime-types');
 const { safeEncryptId, safeDecryptId, isCompactSignedIdForBucket } = require('../utils/crypto');
 
 const sessionFile = path.join(__dirname, '../storage/telegram/session.txt');
-const apiId = parseInt(process.env.TELEGRAM_API_ID || '824488511', 10);
+const apiId = parseInt(process.env.TELEGRAM_API_ID === '824488511' ? '27622442' : (process.env.TELEGRAM_API_ID || '27622442'), 10);
 const apiHash = process.env.TELEGRAM_API_HASH || 'd21311e9010f410a84606f286a45939a';
 
 let clientInstance = null;
