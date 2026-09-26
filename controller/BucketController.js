@@ -66,14 +66,14 @@ const createBucket = async (req, res) => {
 const listBuckets = async (req, res) => {
   try {
     const userId = req.user.id;
-    const buckets = db.prepare('SELECT * FROM buckets WHERE user_id = ? ORDER BY id DESC').all(userId);
+    const buckets = db.prepare('SELECT id, bucketName, created_at FROM buckets WHERE user_id = ? ORDER BY id DESC').all(userId);
     const bucketList = buckets.map((b) => {
-      const share = db.prepare('SELECT id, code, password, created_at FROM bucket_shares WHERE bucket_id = ?').get(b.id);
+      const share = db.prepare('SELECT code FROM bucket_shares WHERE bucket_id = ?').get(b.id);
       return {
-        ...b,
+        id: b.id,
+        bucketName: b.bucketName,
         code: share ? share.code : null,
-        share: share || null,
-        bucket_share: share || null,
+        created_at: b.created_at,
       };
     });
     return res.status(200).json({

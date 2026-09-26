@@ -178,27 +178,33 @@ const updateProfile = async (req, res) => {
 const dashboard = async (req, res) => {
   try {
     const userId = req.user.id;
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-    const buckets = db.prepare('SELECT * FROM buckets WHERE user_id = ? ORDER BY id DESC').all(userId);
+    const user = db.prepare('SELECT id, name, email, bucketAllowed, status FROM users WHERE id = ?').get(userId);
+    if (!user) {
+      return res.status(404).json({ status: false, message: 'User not found.' });
+    }
+
+    const buckets = db.prepare('SELECT id, bucketName, created_at FROM buckets WHERE user_id = ? ORDER BY id DESC').all(userId);
 
     const bucketList = buckets.map((b) => {
-      const share = db.prepare('SELECT id, code, password, created_at FROM bucket_shares WHERE bucket_id = ?').get(b.id);
+      const share = db.prepare('SELECT code FROM bucket_shares WHERE bucket_id = ?').get(b.id);
       return {
         id: b.id,
         bucketName: b.bucketName,
-        channel_id: b.channel_id,
-        created_at: b.created_at,
-        updated_at: b.updated_at,
         code: share ? share.code : null,
-        share: share || null,
-        bucket_share: share || null,
+        created_at: b.created_at,
       };
     });
 
     return res.status(200).json({
       status: true,
       data: {
-        user: sanitizeUser(user),
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          bucketAllowed: user.bucketAllowed,
+          status: user.status || 'active',
+        },
         bucket: bucketList,
       },
     });
