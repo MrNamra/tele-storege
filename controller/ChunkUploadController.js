@@ -92,7 +92,7 @@ const init = async (req, res) => {
 
     db.prepare(
       `INSERT INTO upload_queues (upload_id, bucket_id, channel_id, file_path, file_name, file_size, status, progress, user_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+       VALUES (?, ?, ?, ?, ?, ?, 'uploading', 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
     ).run(uploadId, bucket.id, bucket.channel_id, assembledPath, file_name, file_size || 0, userId);
 
     return res.status(200).json({
@@ -110,20 +110,40 @@ const init = async (req, res) => {
 };
 
 const uploadChunk = async (req, res) => {
-  try {
-    const uploadId = req.body.upload_id;
-    const chunkIndex = req.body.chunk_index;
+  const uploadId = req.body.upload_id;
+  const chunkIndex = req.body.chunk_index;
 
+  try {
     if (!uploadId || chunkIndex === undefined) {
+      if (req.file && fs.existsSync(req.file.path)) {
+        try { fs.unlinkSync(req.file.path); } catch (_) {}
+      }
       return res.status(422).json({ success: false, message: 'upload_id and chunk_index are required' });
     }
 
     const job = db.prepare('SELECT * FROM upload_queues WHERE upload_id = ?').get(uploadId);
     if (!job) {
+      if (req.file && fs.existsSync(req.file.path)) {
+        try { fs.unlinkSync(req.file.path); } catch (_) {}
+      }
       return res.status(404).json({ success: false, message: 'Upload session not found' });
     }
 
+    // If session was already marked failed or cancelled by a previous error, stop all next chunks immediately
+    if (job.status === 'failed' || job.status === 'cancelled') {
+      if (req.file && fs.existsSync(req.file.path)) {
+        try { fs.unlinkSync(req.file.path); } catch (_) {}
+      }
+      return res.status(409).json({
+        success: false,
+        message: `Upload session already terminated (${job.status}): ${job.error || 'Upload aborted'}`,
+      });
+    }
+
     if (!verifyUploadAccess(req, job)) {
+      if (req.file && fs.existsSync(req.file.path)) {
+        try { fs.unlinkSync(req.file.path); } catch (_) {}
+      }
       return res.status(403).json({
         success: false,
         message: 'Access denied.',
@@ -132,15 +152,23 @@ const uploadChunk = async (req, res) => {
 
     const chunkDir = path.join(chunksBaseDir, uploadId);
     if (!fs.existsSync(chunkDir)) {
+      if (req.file && fs.existsSync(req.file.path)) {
+        try { fs.unlinkSync(req.file.path); } catch (_) {}
+      }
       return res.status(404).json({ success: false, message: 'Upload session directory not found' });
     }
 
-    if (!req.file) {
+    const chunkFile = req.file || (req.files && req.files.find((f) => f.fieldname === 'chunk')) || (req.files && req.files[0]);
+
+    if (!chunkFile) {
+      // Mark session as failed so any next chunks are aborted immediately
+      db.prepare("UPDATE upload_queues SET status = 'failed', error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .run(`Missing chunk payload for chunk ${chunkIndex}`, job.id);
       return res.status(422).json({ success: false, message: 'No chunk file provided' });
     }
 
     const destPath = path.join(chunkDir, String(chunkIndex));
-    fs.renameSync(req.file.path, destPath);
+    fs.renameSync(chunkFile.path, destPath);
 
     return res.status(200).json({
       success: true,
@@ -148,6 +176,16 @@ const uploadChunk = async (req, res) => {
     });
   } catch (error) {
     console.error('Upload chunk error:', error);
+    // Mark session as failed in DB so all subsequent/concurrent chunks stop immediately
+    if (uploadId) {
+      try {
+        db.prepare("UPDATE upload_queues SET status = 'failed', error = ?, updated_at = CURRENT_TIMESTAMP WHERE upload_id = ?")
+          .run(error.message || 'Chunk upload failed', uploadId);
+      } catch (_) {}
+    }
+    if (req.file && fs.existsSync(req.file.path)) {
+      try { fs.unlinkSync(req.file.path); } catch (_) {}
+    }
     return res.status(500).json({ success: false, message: 'Server error: ' + error.message });
   }
 };
@@ -176,6 +214,8 @@ const complete = async (req, res) => {
     if (!fs.existsSync(chunkDir)) {
       return res.status(404).json({ success: false, message: 'Chunks not found' });
     }
+
+    db.prepare("UPDATE upload_queues SET status = 'assembling', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(job.id);
 
     // Assemble asynchronously in background to avoid blocking HTTP response
     setImmediate(async () => {
@@ -206,7 +246,8 @@ const complete = async (req, res) => {
           fs.rmSync(chunkDir, { recursive: true, force: true });
         } catch {}
 
-        // Enqueue background processing
+        // Enqueue background processing now that assembled file is on disk
+        db.prepare("UPDATE upload_queues SET status = 'pending', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(job.id);
         processNextJob();
       } catch (err) {
         console.error('Assembly error for upload', upload_id, err);

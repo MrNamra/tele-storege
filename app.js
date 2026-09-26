@@ -81,7 +81,32 @@ app.use(
   })
 );
 
-// 4. SPA Fallback for client-side routing
+// 4. Global Error Handling Middleware (Catches MulterErrors, JSON parse errors, etc.)
+app.use((err, req, res, next) => {
+  if (res.headersSent) {
+    return next(err);
+  }
+
+  // Handle Multer errors (e.g. file size exceeded, unexpected field name)
+  if (err && (err.name === 'MulterError' || err.code === 'LIMIT_UNEXPECTED_FILE')) {
+    console.warn(`[MulterError] ${err.message} on ${req.method} ${req.originalUrl}${err.field ? ` (field: "${err.field}")` : ''}`);
+    return res.status(400).json({
+      status: false,
+      success: false,
+      error: err.code || 'MULTER_ERROR',
+      message: `File upload error: ${err.message}${err.field ? ` (field: "${err.field}")` : ''}. Any field name is accepted.`,
+    });
+  }
+
+  console.error(`[Server Error] on ${req.method} ${req.originalUrl}:`, err);
+  return res.status(err.status || 500).json({
+    status: false,
+    success: false,
+    message: err.message || 'Internal server error',
+  });
+});
+
+// 5. SPA Fallback for client-side routing
 app.get('*', (req, res) => {
   // If it's an API route that reached here, return JSON 404
   if (req.path.startsWith('/api/')) {

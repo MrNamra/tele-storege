@@ -9,6 +9,7 @@ if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
 
 const upload = multer({ dest: tmpDir });
 
+const { flexibleUpload } = require('../middleware/uploadMiddleware');
 const BucketController = require('../controller/BucketController');
 const FileController = require('../controller/FileController');
 const { authMiddleware, optionalAuthMiddleware } = require('../middleware/AuthMiddleware');
@@ -25,7 +26,7 @@ router.post('/end-share/:code', authMiddleware, BucketController.endShare);
 
 // Bucket File Management
 router.post('/:bucket/delete-file', authMiddleware, FileController.removeFile);
-router.post('/file/upload', authMiddleware, upload.array('files'), FileController.uploadFile);
+router.post('/file/upload', authMiddleware, flexibleUpload, FileController.uploadFile);
 router.all('/file/download/:bucket?/:fileId?', optionalAuthMiddleware, FileController.downloadFile);
 router.all('/file/stream', optionalAuthMiddleware, FileController.streamFile);
 

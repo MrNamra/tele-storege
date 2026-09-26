@@ -1,4 +1,5 @@
 const { TelegramClient, Api } = require('telegram');
+const { strippedPhotoToJpg } = require('telegram/Utils');
 const { StringSession } = require('telegram/sessions');
 const { ConnectionTCPFull } = require('telegram/network/connection/TCPFull');
 const { Logger, LogLevel } = require('telegram/extensions/Logger');
@@ -131,33 +132,35 @@ function getInputPeer(channelId, accessHash) {
   return bigInt(cleanId);
 }
 
-// Convert Telegram stripped thumbnail bytes into valid JPEG
+function detectImageMime(buf) {
+  if (!buf || buf.length < 4) return null;
+  // JPEG: FF D8 FF
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  // PNG: 89 50 4E 47
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
+  // GIF: 47 49 46 38
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38) return 'image/gif';
+  // WEBP: RIFF....WEBP
+  if (buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+  return null;
+}
+
+function isValidImageBuffer(buf) {
+  return detectImageMime(buf) !== null;
+}
+
+// Convert Telegram stripped thumbnail bytes into valid JPEG using GramJS official JFIF header reconstruction
 function extractStrippedJpeg(rawBytes) {
   if (!rawBytes || rawBytes.length < 3) return null;
-  if (rawBytes[0] !== 0x01) return Buffer.from(rawBytes);
-
-  const header = Buffer.from([
-    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
-    0x00, 0x01, 0x00, 0x00, 0xff, 0xdb, 0x00, 0x43, 0x00, 0x28, 0x1c, 0x1e, 0x23, 0x1e, 0x19, 0x28,
-    0x23, 0x21, 0x23, 0x2d, 0x2b, 0x28, 0x30, 0x3c, 0x64, 0x41, 0x3c, 0x37, 0x37, 0x3c, 0x7b, 0x58,
-    0x5d, 0x49, 0x64, 0x91, 0x80, 0x99, 0x96, 0x8f, 0x80, 0x8c, 0x8a, 0xa0, 0xb4, 0xe6, 0xc3, 0xa0,
-    0xaa, 0xda, 0xae, 0x8a, 0x8c, 0xc8, 0xff, 0xcb, 0xda, 0xee, 0xf5, 0xff, 0xff, 0xfb, 0x9b, 0xc1,
-    0xff, 0xff, 0xff, 0xfa, 0xff, 0xe6, 0xfd, 0xff, 0xf8, 0xff, 0xc0, 0x00, 0x11, 0x08,
-  ]);
-
-  const height = rawBytes[1];
-  const width = rawBytes[2];
-  const sizeBuf = Buffer.from([0x00, height, 0x00, width, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01]);
-  const middle = Buffer.from([
-    0xff, 0xc4, 0x00, 0x1f, 0x00, 0x00, 0x01, 0x05, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
-    0x0b, 0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x11, 0x03, 0x11, 0x00, 0x3f, 0x00,
-  ]);
-
-  const payload = rawBytes.subarray(3);
-  const footer = Buffer.from([0xff, 0xd9]);
-
-  return Buffer.concat([header, sizeBuf, middle, payload, footer]);
+  try {
+    const jpg = strippedPhotoToJpg(rawBytes);
+    if (jpg && isValidImageBuffer(jpg)) {
+      return jpg;
+    }
+  } catch (err) {
+    console.warn('[extractStrippedJpeg] Failed:', err.message);
+  }
+  return null;
 }
 
 async function createPrivateChannel(name) {
@@ -346,10 +349,12 @@ function serveFallbackBadge(res, mimeType) {
   let color = '#6366f1';
   let label = 'FILE';
   if (mimeType) {
-    if (mimeType.startsWith('video/')) { color = '#ef4444'; label = 'VIDEO'; }
-    else if (mimeType.startsWith('audio/')) { color = '#8b5cf6'; label = 'AUDIO'; }
-    else if (mimeType.includes('pdf')) { color = '#dc2626'; label = 'PDF'; }
-    else if (mimeType.includes('zip') || mimeType.includes('tar') || mimeType.includes('compressed')) { color = '#f59e0b'; label = 'ZIP'; }
+    const m = String(mimeType).toLowerCase();
+    if (m.startsWith('video/')) { color = '#ef4444'; label = 'VIDEO'; }
+    else if (m.startsWith('audio/')) { color = '#8b5cf6'; label = 'AUDIO'; }
+    else if (m.includes('pdf')) { color = '#dc2626'; label = 'PDF'; }
+    else if (m.includes('zip') || m.includes('tar') || m.includes('compressed') || m.includes('rar') || m.includes('7z')) { color = '#f59e0b'; label = 'ZIP'; }
+    else if (m.startsWith('image/')) { color = '#10b981'; label = 'IMG'; }
   }
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160">
@@ -357,7 +362,7 @@ function serveFallbackBadge(res, mimeType) {
     <rect x="25" y="20" width="110" height="120" rx="12" fill="white" stroke="#e2e8f0" stroke-width="2"/>
     <rect x="40" y="36" width="80" height="38" rx="8" fill="${color}" opacity="0.12"/>
     <text x="80" y="60" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="700" fill="${color}" text-anchor="middle" letter-spacing="1">${label}</text>
-    <circle cx="80" y="104" r="16" fill="${color}"/>
+    <circle cx="80" cy="104" r="16" fill="${color}"/>
     <path d="M75 96 L89 104 L75 112 Z" fill="white"/>
   </svg>`;
 
@@ -372,33 +377,43 @@ function serveFallbackBadge(res, mimeType) {
 // Ultra-fast thumbnail streaming with RAM + disk cache
 async function streamThumbnail(channelId, accessHash, msgId, req, res) {
   const cacheKey = `${channelId}_${msgId}`;
+
+  // 1. Check RAM memory cache
   if (strippedCache.has(cacheKey)) {
-    const buf = strippedCache.get(cacheKey);
-    res.writeHead(200, {
-      'Content-Type': 'image/jpeg',
-      'Content-Length': buf.length,
-      'Cache-Control': 'public, max-age=604800, immutable',
-      'Access-Control-Allow-Origin': '*',
-    });
-    return res.end(buf);
+    const cached = strippedCache.get(cacheKey);
+    const buf = Buffer.isBuffer(cached) ? cached : (cached && cached.buf);
+    const detectedMime = (cached && cached.mime) || detectImageMime(buf);
+    if (buf && detectedMime) {
+      res.writeHead(200, {
+        'Content-Type': detectedMime,
+        'Content-Length': buf.length,
+        'Cache-Control': 'public, max-age=604800, immutable',
+        'Access-Control-Allow-Origin': '*',
+      });
+      return res.end(buf);
+    }
   }
 
-  // Check persistent disk cache
+  // 2. Check persistent disk cache
   const cleanChannel = String(channelId).replace(/[^a-zA-Z0-9_-]/g, '');
   const thumbCacheDir = path.join(__dirname, '../storage/app/thumbnails');
   const cacheFilePath = path.join(thumbCacheDir, `thumb_${cleanChannel}_${msgId}.jpg`);
   if (fs.existsSync(cacheFilePath)) {
     try {
       const buf = fs.readFileSync(cacheFilePath);
-      if (buf.length > 0) {
-        strippedCache.set(cacheKey, buf);
+      const detectedMime = detectImageMime(buf);
+      if (buf.length > 0 && detectedMime) {
+        strippedCache.set(cacheKey, { buf, mime: detectedMime });
         res.writeHead(200, {
-          'Content-Type': 'image/jpeg',
+          'Content-Type': detectedMime,
           'Content-Length': buf.length,
           'Cache-Control': 'public, max-age=604800, immutable',
           'Access-Control-Allow-Origin': '*',
         });
         return res.end(buf);
+      } else {
+        // Corrupt or non-image cache file, delete it
+        try { fs.unlinkSync(cacheFilePath); } catch (_) {}
       }
     } catch (_) {}
   }
@@ -408,13 +423,13 @@ async function streamThumbnail(channelId, accessHash, msgId, req, res) {
     return serveFallbackBadge(res, null);
   }
 
-  // 1. Check stripped thumbnail in message (<1KB instant RAM decode)
+  // 3. Check stripped thumbnail in message (<1KB instant RAM decode)
   const thumbs = (msg.photo && msg.photo.sizes) || (msg.document && msg.document.thumbs) || [];
   for (const t of thumbs) {
     if (t.className === 'PhotoStrippedSize' && t.bytes) {
       const stripped = extractStrippedJpeg(t.bytes);
-      if (stripped) {
-        strippedCache.set(cacheKey, stripped);
+      if (stripped && isValidImageBuffer(stripped)) {
+        strippedCache.set(cacheKey, { buf: stripped, mime: 'image/jpeg' });
         try {
           if (!fs.existsSync(thumbCacheDir)) fs.mkdirSync(thumbCacheDir, { recursive: true });
           fs.writeFileSync(cacheFilePath, stripped);
@@ -431,30 +446,36 @@ async function streamThumbnail(channelId, accessHash, msgId, req, res) {
     }
   }
 
-  // 2. Download thumbnail via Telegram client for full-fidelity thumbs
-  try {
-    const client = await getClient();
-    const thumbBuf = await client.downloadMedia(msg, { thumb: 0 });
-    if (thumbBuf && thumbBuf.length > 0) {
-      strippedCache.set(cacheKey, thumbBuf);
-      try {
-        if (!fs.existsSync(thumbCacheDir)) fs.mkdirSync(thumbCacheDir, { recursive: true });
-        fs.writeFileSync(cacheFilePath, thumbBuf);
-      } catch (_) {}
+  // 4. Download thumbnail via Telegram client for full-fidelity thumbs
+  // Guard: ONLY attempt download if there are actual downloadable thumbnails (PhotoSize) or it is a photo message.
+  // Never download full document files if thumbs is empty!
+  const hasDownloadableThumbs = msg.photo || (msg.document && Array.isArray(msg.document.thumbs) && msg.document.thumbs.length > 0);
+  if (hasDownloadableThumbs) {
+    try {
+      const client = await getClient();
+      const thumbBuf = await client.downloadMedia(msg, { thumb: 0 });
+      if (thumbBuf && thumbBuf.length > 0 && isValidImageBuffer(thumbBuf)) {
+        const detectedMime = detectImageMime(thumbBuf) || 'image/jpeg';
+        strippedCache.set(cacheKey, { buf: thumbBuf, mime: detectedMime });
+        try {
+          if (!fs.existsSync(thumbCacheDir)) fs.mkdirSync(thumbCacheDir, { recursive: true });
+          fs.writeFileSync(cacheFilePath, thumbBuf);
+        } catch (_) {}
 
-      res.writeHead(200, {
-        'Content-Type': 'image/jpeg',
-        'Content-Length': thumbBuf.length,
-        'Cache-Control': 'public, max-age=604800, immutable',
-        'Access-Control-Allow-Origin': '*',
-      });
-      return res.end(thumbBuf);
+        res.writeHead(200, {
+          'Content-Type': detectedMime,
+          'Content-Length': thumbBuf.length,
+          'Cache-Control': 'public, max-age=604800, immutable',
+          'Access-Control-Allow-Origin': '*',
+        });
+        return res.end(thumbBuf);
+      }
+    } catch (err) {
+      console.warn(`[Thumbnail] downloadMedia notice for ${channelId}/${msgId}:`, err.message);
     }
-  } catch (err) {
-    console.warn(`[Thumbnail] downloadMedia notice for ${channelId}/${msgId}:`, err.message);
   }
 
-  // 3. Fallback badge if no thumbnail available
+  // 5. Fallback badge if no thumbnail available or non-renderable media
   const mimeType = (msg.document && msg.document.mimeType) || (msg.photo ? 'image/jpeg' : null);
   return serveFallbackBadge(res, mimeType);
 }

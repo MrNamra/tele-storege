@@ -9,12 +9,13 @@ if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
 
 const upload = multer({ dest: tmpDir });
 
+const { flexibleUpload } = require('../middleware/uploadMiddleware');
 const FileController = require('../controller/FileController');
 const { optionalAuthMiddleware } = require('../middleware/AuthMiddleware');
 
 // Shared Bucket endpoints
 router.get('/show/:code', optionalAuthMiddleware, FileController.showSharedBucket);
-router.post('/files/upload/:code', upload.array('files'), FileController.uploadToSharedBucket);
+router.post('/files/upload/:code', flexibleUpload, FileController.uploadToSharedBucket);
 router.all('/files/download/:code/:fileId?', optionalAuthMiddleware, FileController.downloadFromSharedBucket);
 
 // Direct Media Streaming, Thumbnails & Downloads
