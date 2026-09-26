@@ -1,14 +1,5 @@
 const express = require('express');
 const router = express.Router();
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
-
-const tmpDir = path.join(__dirname, '../storage/app/tmp');
-if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-
-const upload = multer({ dest: tmpDir });
-
 const { flexibleUpload } = require('../middleware/uploadMiddleware');
 const BucketController = require('../controller/BucketController');
 const FileController = require('../controller/FileController');

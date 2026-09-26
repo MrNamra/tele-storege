@@ -6,6 +6,7 @@ require('dotenv').config();
 
 const db = require('./config/db');
 const { startQueueWorker } = require('./services/queueService');
+const { startCleanupWorker } = require('./services/cleanupService');
 const telegramService = require('./services/telegramService');
 
 const authRoutes = require('./routes/auth');
@@ -123,6 +124,8 @@ app.get('*', (req, res) => {
 if (require.main === module) {
   // Start sequential background upload worker (keeps RAM < 80MB on 1GB VPS)
   startQueueWorker();
+  // Start automated storage cleanup worker (purges temp files and old chunks every 5 mins)
+  startCleanupWorker();
 
   const PORT = process.env.PORT || 3000;
   const server = app.listen(PORT, () => {

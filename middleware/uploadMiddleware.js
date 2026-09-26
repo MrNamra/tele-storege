@@ -2,11 +2,26 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-const tmpDir = path.join(__dirname, '../storage/app/tmp');
-if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+const { getTmpDir } = require('../utils/storagePaths');
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    try {
+      const dest = getTmpDir();
+      cb(null, dest);
+    } catch (err) {
+      cb(err);
+    }
+  },
+  filename: function (req, file, cb) {
+    const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const safeName = (file.originalname || 'file').replace(/[^a-zA-Z0-9._-]/g, '_');
+    cb(null, `up-${unique}-${safeName}`);
+  },
+});
 
 const upload = multer({
-  dest: tmpDir,
+  storage,
   limits: {
     // Support large files up to 2GB per chunk/file
     fileSize: 2 * 1024 * 1024 * 1024,

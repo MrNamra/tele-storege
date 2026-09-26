@@ -8,6 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const mime = require('mime-types');
 const { safeEncryptId, safeDecryptId, isCompactSignedIdForBucket } = require('../utils/crypto');
+const { getThumbnailsDir, safeMkdirSync } = require('../utils/storagePaths');
 
 // Telegram MTProto TCP connection forced to port 443 (HTTPS) to bypass ISP port 80 restrictions/blocks
 class ConnectionTCP443 extends ConnectionTCPFull {
@@ -35,9 +36,13 @@ function getSessionString() {
 }
 
 function saveSessionString(sessionStr) {
-  const dir = path.dirname(sessionFile);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(sessionFile, sessionStr, 'utf8');
+  try {
+    const dir = path.dirname(sessionFile);
+    safeMkdirSync(dir);
+    fs.writeFileSync(sessionFile, sessionStr, 'utf8');
+  } catch (err) {
+    console.error('Failed to save session file:', err.message);
+  }
 }
 
 async function getClient() {
@@ -396,7 +401,7 @@ async function streamThumbnail(channelId, accessHash, msgId, req, res) {
 
   // 2. Check persistent disk cache
   const cleanChannel = String(channelId).replace(/[^a-zA-Z0-9_-]/g, '');
-  const thumbCacheDir = path.join(__dirname, '../storage/app/thumbnails');
+  const thumbCacheDir = getThumbnailsDir();
   const cacheFilePath = path.join(thumbCacheDir, `thumb_${cleanChannel}_${msgId}.jpg`);
   if (fs.existsSync(cacheFilePath)) {
     try {
@@ -431,7 +436,7 @@ async function streamThumbnail(channelId, accessHash, msgId, req, res) {
       if (stripped && isValidImageBuffer(stripped)) {
         strippedCache.set(cacheKey, { buf: stripped, mime: 'image/jpeg' });
         try {
-          if (!fs.existsSync(thumbCacheDir)) fs.mkdirSync(thumbCacheDir, { recursive: true });
+          safeMkdirSync(thumbCacheDir);
           fs.writeFileSync(cacheFilePath, stripped);
         } catch (_) {}
 
@@ -458,7 +463,7 @@ async function streamThumbnail(channelId, accessHash, msgId, req, res) {
         const detectedMime = detectImageMime(thumbBuf) || 'image/jpeg';
         strippedCache.set(cacheKey, { buf: thumbBuf, mime: detectedMime });
         try {
-          if (!fs.existsSync(thumbCacheDir)) fs.mkdirSync(thumbCacheDir, { recursive: true });
+          safeMkdirSync(thumbCacheDir);
           fs.writeFileSync(cacheFilePath, thumbBuf);
         } catch (_) {}
 
