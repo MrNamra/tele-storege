@@ -1,5 +1,6 @@
 const { TelegramClient, Api } = require('telegram');
 const { StringSession } = require('telegram/sessions');
+const bigInt = require('big-integer');
 const fs = require('fs');
 const path = require('path');
 const mime = require('mime-types');
@@ -77,11 +78,11 @@ function getInputPeer(channelId, accessHash) {
   const cleanId = channelId.toString().replace(/^-100/, '').replace(/^-/, '');
   if (accessHash) {
     return new Api.InputPeerChannel({
-      channelId: BigInt(cleanId),
-      accessHash: BigInt(accessHash),
+      channelId: bigInt(cleanId),
+      accessHash: bigInt(accessHash),
     });
   }
-  return BigInt(cleanId);
+  return bigInt(cleanId);
 }
 
 // Convert Telegram stripped thumbnail bytes into valid JPEG
@@ -440,12 +441,12 @@ async function streamMedia(channelId, accessHash, msgId, req, res, forceDownload
       return res.end();
     }
 
-    const chunkSize = end - start + 1;
+    const bytesToRead = end - start + 1;
 
     res.writeHead(206, {
       'Content-Range': `bytes ${start}-${end}/${fileSize || '*'}`,
       'Accept-Ranges': 'bytes',
-      'Content-Length': chunkSize,
+      'Content-Length': bytesToRead,
       'Content-Type': mimeType,
       'Content-Disposition': `${disposition}; filename="${encodeURIComponent(fileName)}"`,
       'Cache-Control': 'public, max-age=86400',
@@ -457,17 +458,31 @@ async function streamMedia(channelId, accessHash, msgId, req, res, forceDownload
     let isAborted = false;
     res.on('close', () => { isAborted = true; });
 
+    const downloadChunkSize = 256 * 1024;
+    const maxChunks = Math.ceil(bytesToRead / downloadChunkSize) + 2;
+    let bytesSent = 0;
+
     try {
       for await (const chunk of client.iterDownload({
         file: msg.media,
-        offset: BigInt(start),
-        limit: chunkSize,
-        chunkSize: 256 * 1024,
+        offset: bigInt(start),
+        limit: maxChunks,
+        chunkSize: downloadChunkSize,
+        requestSize: downloadChunkSize,
       })) {
         if (isAborted) break;
-        if (!res.write(chunk)) {
+        const remaining = bytesToRead - bytesSent;
+        if (remaining <= 0) break;
+
+        const toSend = Math.min(chunk.length, remaining);
+        const slice = chunk.length === toSend ? chunk : chunk.subarray(0, toSend);
+        bytesSent += toSend;
+
+        if (!res.write(slice)) {
           await new Promise((resolve) => res.once('drain', resolve));
         }
+
+        if (bytesSent >= bytesToRead) break;
       }
     } catch (err) {
       if (!isAborted) console.error('Streaming chunk error:', err.message);
@@ -493,7 +508,9 @@ async function streamMedia(channelId, accessHash, msgId, req, res, forceDownload
     try {
       for await (const chunk of client.iterDownload({
         file: msg.media,
+        offset: bigInt.zero,
         chunkSize: 512 * 1024,
+        requestSize: 512 * 1024,
       })) {
         if (isAborted) break;
         if (!res.write(chunk)) {
