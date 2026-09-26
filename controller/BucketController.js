@@ -67,11 +67,20 @@ const listBuckets = async (req, res) => {
   try {
     const userId = req.user.id;
     const buckets = db.prepare('SELECT * FROM buckets WHERE user_id = ? ORDER BY id DESC').all(userId);
+    const bucketList = buckets.map((b) => {
+      const share = db.prepare('SELECT id, code, password, created_at FROM bucket_shares WHERE bucket_id = ?').get(b.id);
+      return {
+        ...b,
+        code: share ? share.code : null,
+        share: share || null,
+        bucket_share: share || null,
+      };
+    });
     return res.status(200).json({
       status: true,
       message: 'Buckets retrieved successfully',
-      data: buckets,
-      buckets,
+      data: bucketList,
+      buckets: bucketList,
     });
   } catch (error) {
     console.error('List buckets error:', error);
@@ -174,6 +183,14 @@ const shareBucket = async (req, res) => {
         db.prepare('UPDATE bucket_shares SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(password || null, share.id);
         share = db.prepare('SELECT * FROM bucket_shares WHERE id = ?').get(share.id);
       }
+      if (!share.code) {
+        let code = generateShareCode();
+        while (db.prepare('SELECT id FROM bucket_shares WHERE code = ?').get(code)) {
+          code = generateShareCode();
+        }
+        db.prepare('UPDATE bucket_shares SET code = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(code, share.id);
+        share = db.prepare('SELECT * FROM bucket_shares WHERE id = ?').get(share.id);
+      }
     } else {
       let code = generateShareCode();
       while (db.prepare('SELECT id FROM bucket_shares WHERE code = ?').get(code)) {
@@ -192,8 +209,12 @@ const shareBucket = async (req, res) => {
 
     return res.status(200).json({
       status: true,
+      success: true,
       message: 'Bucket shared successfully',
-      data: share,
+      data: {
+        ...share,
+        code: share.code,
+      },
       code: share.code,
     });
   } catch (error) {

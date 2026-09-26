@@ -189,7 +189,9 @@ const dashboard = async (req, res) => {
         channel_id: b.channel_id,
         created_at: b.created_at,
         updated_at: b.updated_at,
+        code: share ? share.code : null,
         share: share || null,
+        bucket_share: share || null,
       };
     });
 
