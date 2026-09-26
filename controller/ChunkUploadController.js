@@ -51,6 +51,16 @@ const init = async (req, res) => {
     if (code) {
       const share = db.prepare('SELECT * FROM bucket_shares WHERE code = ?').get(code);
       if (share) {
+        if (share.password) {
+          const providedPassword = req.body.password || req.headers['x-bucket-password'] || req.query.password;
+          if (!providedPassword || providedPassword !== share.password) {
+            return res.status(403).json({
+              success: false,
+              requiresPassword: true,
+              message: 'Password is wrong or required to upload files to this shared bucket.',
+            });
+          }
+        }
         bucket = db.prepare('SELECT * FROM buckets WHERE id = ?').get(share.bucket_id);
         isShareUpload = true;
       }

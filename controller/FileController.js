@@ -240,17 +240,6 @@ const showSharedBucket = async (req, res) => {
       return res.status(404).json({ status: false, message: 'Bucket not found.' });
     }
 
-    // Check password if set
-    if (share.password) {
-      const providedPassword = req.query.password || req.headers['x-bucket-password'];
-      if (!providedPassword || providedPassword !== share.password) {
-        return res.status(403).json({
-          status: false,
-          requiresPassword: true,
-          message: 'Password required to access this bucket.',
-        });
-      }
-    }
 
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 15;
@@ -303,6 +292,17 @@ const uploadToSharedBucket = async (req, res) => {
     const bucket = db.prepare('SELECT * FROM buckets WHERE id = ?').get(share.bucket_id);
     if (!bucket) {
       return res.status(404).json({ status: false, message: 'Bucket not found.' });
+    }
+
+    if (share.password) {
+      const providedPassword = req.body.password || req.headers['x-bucket-password'] || req.query.password;
+      if (!providedPassword || providedPassword !== share.password) {
+        return res.status(403).json({
+          status: false,
+          requiresPassword: true,
+          message: 'Password is required to upload files to this shared bucket.',
+        });
+      }
     }
 
     const files = req.files || (req.file ? [req.file] : []);
