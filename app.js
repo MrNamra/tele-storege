@@ -136,6 +136,14 @@ if (require.main === module) {
     console.log(`===================================================`);
   });
 
+  // Support large 1GB+ uploads without Node.js socket timeout
+  server.timeout = 30 * 60 * 1000; // 30 minutes
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 66000;
+  if (server.requestTimeout !== undefined) {
+    server.requestTimeout = 30 * 60 * 1000; // 30 minutes
+  }
+
   // Graceful shutdown handling
   const shutdown = async (signal) => {
     console.log(`${signal} signal received: closing server cleanly`);

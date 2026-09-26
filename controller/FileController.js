@@ -1,12 +1,19 @@
 const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
 const db = require('../config/db');
 const telegramService = require('../services/telegramService');
+const { processNextJob } = require('../services/queueService');
+const { getAssembledDir, safeMkdirSync } = require('../utils/storagePaths');
 const { safeDecryptId, safeEncryptId } = require('../utils/crypto');
 const { canAccessBucket } = require('../middleware/AuthMiddleware');
 
 const uploadFile = async (req, res) => {
+  if (req.setTimeout) req.setTimeout(30 * 60 * 1000);
+  if (res.setTimeout) res.setTimeout(30 * 60 * 1000);
+
   try {
-    const bucketId = req.body.bucket_id;
+    const bucketId = req.body.bucket_id || req.params.bucket;
     const userId = req.user.id;
 
     if (!bucketId) {
@@ -23,32 +30,79 @@ const uploadFile = async (req, res) => {
       return res.status(422).json({ status: false, message: 'No files provided.' });
     }
 
+    const isAsync =
+      req.query.async === '1' ||
+      req.query.async === 'true' ||
+      req.headers['x-async-upload'] === 'true' ||
+      files.some((f) => (f.size || 0) > 25 * 1024 * 1024);
+
+    const isExplicitSync = req.query.sync === '1' || req.query.sync === 'true';
+
     const results = [];
 
     for (const file of files) {
-      try {
-        const uploadRes = await telegramService.uploadFileToChannel(
-          bucket.channel_id,
-          bucket.access_hash,
-          file.path,
-          file.originalname
-        );
+      if (isAsync && !isExplicitSync) {
+        // Enqueue large files to background upload queue so the HTTP connection never times out
+        try {
+          const uploadId = crypto.randomUUID();
+          const safeName = (file.originalname || 'file').replace(/[^a-zA-Z0-9._-]/g, '_');
+          const targetDir = getAssembledDir();
+          safeMkdirSync(targetDir);
+          const finalPath = path.join(targetDir, `${uploadId}_${safeName}`);
+          fs.renameSync(file.path, finalPath);
 
-        results.push({
-          name: file.originalname,
-          uploaded: true,
-          msg_id: uploadRes ? safeEncryptId(uploadRes.id, bucket.id) : null,
-        });
-      } catch (err) {
-        console.error('File upload to Telegram error:', err);
-        results.push({
-          name: file.originalname,
-          uploaded: false,
-          error: err.message,
-        });
-      } finally {
-        if (fs.existsSync(file.path)) {
-          fs.unlinkSync(file.path);
+          db.prepare(
+            `INSERT INTO upload_queues (upload_id, bucket_id, channel_id, file_path, file_name, file_size, status, progress, user_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+          ).run(uploadId, bucket.id, bucket.channel_id, finalPath, file.originalname, file.size || 0, userId);
+
+          processNextJob();
+
+          results.push({
+            name: file.originalname,
+            uploaded: true,
+            queued: true,
+            upload_id: uploadId,
+            status_url: `/api/upload/status/${uploadId}`,
+            message: 'Queued for Cloud upload in background',
+          });
+        } catch (err) {
+          console.error('File queue error:', err);
+          if (fs.existsSync(file.path)) {
+            try { fs.unlinkSync(file.path); } catch (_) {}
+          }
+          results.push({
+            name: file.originalname,
+            uploaded: false,
+            error: err.message,
+          });
+        }
+      } else {
+        // Synchronous upload for small files or explicit sync requests
+        try {
+          const uploadRes = await telegramService.uploadFileToChannel(
+            bucket.channel_id,
+            bucket.access_hash,
+            file.path,
+            file.originalname
+          );
+
+          results.push({
+            name: file.originalname,
+            uploaded: true,
+            msg_id: uploadRes ? safeEncryptId(uploadRes.id, bucket.id) : null,
+          });
+        } catch (err) {
+          console.error('File upload to Telegram error:', err);
+          results.push({
+            name: file.originalname,
+            uploaded: false,
+            error: err.message,
+          });
+        } finally {
+          if (fs.existsSync(file.path)) {
+            try { fs.unlinkSync(file.path); } catch (_) {}
+          }
         }
       }
     }
@@ -281,6 +335,9 @@ const showSharedBucket = async (req, res) => {
 };
 
 const uploadToSharedBucket = async (req, res) => {
+  if (req.setTimeout) req.setTimeout(30 * 60 * 1000);
+  if (res.setTimeout) res.setTimeout(30 * 60 * 1000);
+
   try {
     const code = req.params.code;
     const share = db.prepare('SELECT * FROM bucket_shares WHERE code = ?').get(code);
@@ -310,32 +367,77 @@ const uploadToSharedBucket = async (req, res) => {
       return res.status(422).json({ status: false, message: 'No files uploaded.' });
     }
 
+    const isAsync =
+      req.query.async === '1' ||
+      req.query.async === 'true' ||
+      req.headers['x-async-upload'] === 'true' ||
+      files.some((f) => (f.size || 0) > 25 * 1024 * 1024);
+
+    const isExplicitSync = req.query.sync === '1' || req.query.sync === 'true';
+    const userId = req.user ? req.user.id : null;
     const results = [];
 
     for (const file of files) {
-      try {
-        const uploadRes = await telegramService.uploadFileToChannel(
-          bucket.channel_id,
-          bucket.access_hash,
-          file.path,
-          file.originalname
-        );
+      if (isAsync && !isExplicitSync) {
+        try {
+          const uploadId = crypto.randomUUID();
+          const safeName = (file.originalname || 'file').replace(/[^a-zA-Z0-9._-]/g, '_');
+          const targetDir = getAssembledDir();
+          safeMkdirSync(targetDir);
+          const finalPath = path.join(targetDir, `${uploadId}_${safeName}`);
+          fs.renameSync(file.path, finalPath);
 
-        results.push({
-          name: file.originalname,
-          uploaded: true,
-          msg_id: uploadRes ? safeEncryptId(uploadRes.id, bucket.id) : null,
-        });
-      } catch (err) {
-        console.error('Shared upload error:', err);
-        results.push({
-          name: file.originalname,
-          uploaded: false,
-          error: err.message,
-        });
-      } finally {
-        if (fs.existsSync(file.path)) {
-          fs.unlinkSync(file.path);
+          db.prepare(
+            `INSERT INTO upload_queues (upload_id, bucket_id, channel_id, file_path, file_name, file_size, status, progress, user_id, share_code, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+          ).run(uploadId, bucket.id, bucket.channel_id, finalPath, file.originalname, file.size || 0, userId, share.code);
+
+          processNextJob();
+
+          results.push({
+            name: file.originalname,
+            uploaded: true,
+            queued: true,
+            upload_id: uploadId,
+            status_url: `/api/upload/status/${uploadId}`,
+            message: 'Queued for Cloud upload in background',
+          });
+        } catch (err) {
+          console.error('File queue error:', err);
+          if (fs.existsSync(file.path)) {
+            try { fs.unlinkSync(file.path); } catch (_) {}
+          }
+          results.push({
+            name: file.originalname,
+            uploaded: false,
+            error: err.message,
+          });
+        }
+      } else {
+        try {
+          const uploadRes = await telegramService.uploadFileToChannel(
+            bucket.channel_id,
+            bucket.access_hash,
+            file.path,
+            file.originalname
+          );
+
+          results.push({
+            name: file.originalname,
+            uploaded: true,
+            msg_id: uploadRes ? safeEncryptId(uploadRes.id, bucket.id) : null,
+          });
+        } catch (err) {
+          console.error('Shared upload error:', err);
+          results.push({
+            name: file.originalname,
+            uploaded: false,
+            error: err.message,
+          });
+        } finally {
+          if (fs.existsSync(file.path)) {
+            try { fs.unlinkSync(file.path); } catch (_) {}
+          }
         }
       }
     }
