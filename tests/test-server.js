@@ -140,11 +140,20 @@ async function runTests() {
     assert(!!initRes.body.data.upload_id, 'Upload ID generated');
     const uploadId = initRes.body.data.upload_id;
 
-    const statusRes = await request({
+    // Unauthenticated status request MUST be blocked with 403
+    const unauthStatusRes = await request({
       path: `/api/upload/status/${uploadId}`,
       method: 'GET',
     });
-    assert(statusRes.status === 200, 'Chunk upload status query 200');
+    assert(unauthStatusRes.status === 403, 'Unauthenticated status query returns 403 Forbidden');
+
+    // Authenticated status request by owner MUST succeed with 200
+    const statusRes = await request({
+      path: `/api/upload/status/${uploadId}`,
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert(statusRes.status === 200, 'Owner chunk upload status query returns 200');
     assert(statusRes.body.data.status === 'pending', 'Initial status is pending');
 
     // 8. Test Admin Panel with Admin user

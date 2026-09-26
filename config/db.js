@@ -79,10 +79,15 @@ db.exec(`
     "file_size" INTEGER NOT NULL DEFAULT 0,
     "status" VARCHAR NOT NULL DEFAULT 'pending',
     "progress" INTEGER NOT NULL DEFAULT 0,
+    "user_id" INTEGER,
     "error" TEXT,
     "created_at" DATETIME DEFAULT CURRENT_TIMESTAMP,
     "updated_at" DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `);
+
+try {
+  db.exec('ALTER TABLE upload_queues ADD COLUMN user_id INTEGER');
+} catch {}
 
 module.exports = db;

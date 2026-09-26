@@ -521,9 +521,21 @@ async function uploadFileToChannel(channelId, accessHash, filePath, originalName
   ];
 
   if (isVideo) {
-    attributes.push(new Api.DocumentAttributeVideo({ supportsStreaming: true }));
+    attributes.push(
+      new Api.DocumentAttributeVideo({
+        duration: 0.0,
+        w: 0,
+        h: 0,
+        supportsStreaming: true,
+      })
+    );
   } else if (isAudio) {
-    attributes.push(new Api.DocumentAttributeAudio({ voice: false }));
+    attributes.push(
+      new Api.DocumentAttributeAudio({
+        duration: 0,
+        voice: false,
+      })
+    );
   }
 
   const result = await client.sendFile(peer, {

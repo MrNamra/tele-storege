@@ -10,6 +10,33 @@ const assembledBaseDir = path.join(__dirname, '../storage/app/assembled');
 if (!fs.existsSync(chunksBaseDir)) fs.mkdirSync(chunksBaseDir, { recursive: true });
 if (!fs.existsSync(assembledBaseDir)) fs.mkdirSync(assembledBaseDir, { recursive: true });
 
+function verifyUploadAccess(req, job) {
+  if (!job) return false;
+
+  const bucket = db.prepare('SELECT * FROM buckets WHERE id = ?').get(job.bucket_id);
+  if (!bucket) return false;
+
+  // 1. Authenticated user who is the bucket owner, upload owner, or admin
+  if (req.user) {
+    if (
+      Number(req.user.id) === Number(bucket.user_id) ||
+      req.user.role === 'admin' ||
+      (job.user_id && Number(req.user.id) === Number(job.user_id))
+    ) {
+      return true;
+    }
+  }
+
+  // 2. If uploaded via a shared bucket link, allow if the requester provides the valid share code
+  const shareCode = req.query.code || req.headers['x-bucket-code'] || (req.body && req.body.code);
+  if (shareCode) {
+    const share = db.prepare('SELECT id FROM bucket_shares WHERE bucket_id = ? AND code = ?').get(bucket.id, shareCode);
+    if (share) return true;
+  }
+
+  return false;
+}
+
 const init = async (req, res) => {
   try {
     const { file_name, file_size, total_chunks, bucket_id, code } = req.body;
@@ -19,17 +46,30 @@ const init = async (req, res) => {
     }
 
     let bucket = null;
-    if (bucket_id) {
-      bucket = db.prepare('SELECT * FROM buckets WHERE id = ?').get(bucket_id);
-    } else if (code) {
+    let isShareUpload = false;
+
+    if (code) {
       const share = db.prepare('SELECT * FROM bucket_shares WHERE code = ?').get(code);
       if (share) {
         bucket = db.prepare('SELECT * FROM buckets WHERE id = ?').get(share.bucket_id);
+        isShareUpload = true;
       }
+    } else if (bucket_id) {
+      bucket = db.prepare('SELECT * FROM buckets WHERE id = ?').get(bucket_id);
     }
 
     if (!bucket) {
       return res.status(404).json({ success: false, message: 'Bucket not found or invalid share code' });
+    }
+
+    // If private bucket upload, caller must be logged in and own the bucket
+    if (!isShareUpload) {
+      if (!req.user || Number(req.user.id) !== Number(bucket.user_id)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied: only the bucket owner can upload files here.',
+        });
+      }
     }
 
     const uploadId = crypto.randomUUID();
@@ -38,11 +78,12 @@ const init = async (req, res) => {
 
     const safeName = file_name.replace(/[^a-zA-Z0-9._-]/g, '_');
     const assembledPath = path.join(assembledBaseDir, `${uploadId}_${safeName}`);
+    const userId = req.user ? req.user.id : null;
 
     db.prepare(
-      `INSERT INTO upload_queues (upload_id, bucket_id, channel_id, file_path, file_name, file_size, status, progress, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
-    ).run(uploadId, bucket.id, bucket.channel_id, assembledPath, file_name, file_size || 0);
+      `INSERT INTO upload_queues (upload_id, bucket_id, channel_id, file_path, file_name, file_size, status, progress, user_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+    ).run(uploadId, bucket.id, bucket.channel_id, assembledPath, file_name, file_size || 0, userId);
 
     return res.status(200).json({
       success: true,
@@ -67,9 +108,21 @@ const uploadChunk = async (req, res) => {
       return res.status(422).json({ success: false, message: 'upload_id and chunk_index are required' });
     }
 
+    const job = db.prepare('SELECT * FROM upload_queues WHERE upload_id = ?').get(uploadId);
+    if (!job) {
+      return res.status(404).json({ success: false, message: 'Upload session not found' });
+    }
+
+    if (!verifyUploadAccess(req, job)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied.',
+      });
+    }
+
     const chunkDir = path.join(chunksBaseDir, uploadId);
     if (!fs.existsSync(chunkDir)) {
-      return res.status(404).json({ success: false, message: 'Upload session not found' });
+      return res.status(404).json({ success: false, message: 'Upload session directory not found' });
     }
 
     if (!req.file) {
@@ -100,6 +153,13 @@ const complete = async (req, res) => {
     const job = db.prepare('SELECT * FROM upload_queues WHERE upload_id = ?').get(upload_id);
     if (!job) {
       return res.status(404).json({ success: false, message: 'Upload record not found' });
+    }
+
+    if (!verifyUploadAccess(req, job)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: only the owner of this upload can complete it.',
+      });
     }
 
     const chunkDir = path.join(chunksBaseDir, upload_id);
@@ -168,6 +228,13 @@ const status = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Upload not found' });
     }
 
+    if (!verifyUploadAccess(req, job)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: only the owner of this upload can view its status.',
+      });
+    }
+
     let clientStatus = job.status;
     if (clientStatus === 'uploading_to_cloud') {
       clientStatus = 'uploading_to_cloud';
@@ -193,11 +260,20 @@ const cancel = async (req, res) => {
     const uploadId = req.params.uploadId;
     const job = db.prepare('SELECT * FROM upload_queues WHERE upload_id = ?').get(uploadId);
 
-    if (job) {
-      db.prepare("UPDATE upload_queues SET status = 'failed', error = 'Cancelled by user', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(job.id);
-      if (fs.existsSync(job.file_path)) {
-        try { fs.unlinkSync(job.file_path); } catch {}
-      }
+    if (!job) {
+      return res.status(404).json({ success: false, message: 'Upload not found' });
+    }
+
+    if (!verifyUploadAccess(req, job)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: only the owner of this upload can cancel it.',
+      });
+    }
+
+    db.prepare("UPDATE upload_queues SET status = 'failed', error = 'Cancelled by user', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(job.id);
+    if (fs.existsSync(job.file_path)) {
+      try { fs.unlinkSync(job.file_path); } catch {}
     }
 
     const chunkDir = path.join(chunksBaseDir, uploadId);

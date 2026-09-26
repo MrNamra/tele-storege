@@ -94,33 +94,35 @@ app.get('*', (req, res) => {
   return res.status(404).send('Frontend not built. Please run: npm run build:frontend');
 });
 
-// Start sequential background upload worker (keeps RAM < 80MB on 1GB VPS)
-startQueueWorker();
+if (require.main === module) {
+  // Start sequential background upload worker (keeps RAM < 80MB on 1GB VPS)
+  startQueueWorker();
 
-const PORT = process.env.PORT || 3000;
-const server = app.listen(PORT, () => {
-  console.log(`===================================================`);
-  console.log(`🚀 CloudVault Node.js Server running on port ${PORT}`);
-  console.log(`📊 Memory optimized for 1 CPU / 1GB RAM`);
-  console.log(`⚡ Smooth Range streaming enabled on /s/:bucket/:id`);
-  console.log(`===================================================`);
-});
-
-// Graceful shutdown handling
-process.on('SIGTERM', () => {
-  console.log('SIGTERM signal received: closing HTTP server');
-  server.close(() => {
-    try { db.close(); } catch {}
-    process.exit(0);
+  const PORT = process.env.PORT || 3000;
+  const server = app.listen(PORT, () => {
+    console.log(`===================================================`);
+    console.log(`🚀 CloudVault Node.js Server running on port ${PORT}`);
+    console.log(`📊 Memory optimized for 1 CPU / 1GB RAM`);
+    console.log(`⚡ Smooth Range streaming enabled on /s/:bucket/:id`);
+    console.log(`===================================================`);
   });
-});
 
-process.on('SIGINT', () => {
-  console.log('SIGINT signal received: closing HTTP server');
-  server.close(() => {
-    try { db.close(); } catch {}
-    process.exit(0);
+  // Graceful shutdown handling
+  process.on('SIGTERM', () => {
+    console.log('SIGTERM signal received: closing HTTP server');
+    server.close(() => {
+      try { db.close(); } catch {}
+      process.exit(0);
+    });
   });
-});
+
+  process.on('SIGINT', () => {
+    console.log('SIGINT signal received: closing HTTP server');
+    server.close(() => {
+      try { db.close(); } catch {}
+      process.exit(0);
+    });
+  });
+}
 
 module.exports = app;
