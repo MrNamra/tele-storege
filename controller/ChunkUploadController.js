@@ -158,7 +158,7 @@ const complete = async (req, res) => {
     if (!verifyUploadAccess(req, job)) {
       return res.status(403).json({
         success: false,
-        message: 'Access denied: only the owner of this upload can complete it.',
+        message: 'Access denied.',
       });
     }
 
@@ -231,7 +231,7 @@ const status = async (req, res) => {
     if (!verifyUploadAccess(req, job)) {
       return res.status(403).json({
         success: false,
-        message: 'Access denied: only the owner of this upload can view its status.',
+        message: 'Access denied.',
       });
     }
 
@@ -267,7 +267,7 @@ const cancel = async (req, res) => {
     if (!verifyUploadAccess(req, job)) {
       return res.status(403).json({
         success: false,
-        message: 'Access denied: only the owner of this upload can cancel it.',
+        message: 'Access denied.',
       });
     }
 
