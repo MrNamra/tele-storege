@@ -6,9 +6,39 @@ const { Logger, LogLevel } = require('telegram/extensions/Logger');
 const bigInt = require('big-integer');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const { execFileSync } = require('child_process');
 const mime = require('mime-types');
 const { safeEncryptId, safeDecryptId, isCompactSignedIdForBucket } = require('../utils/crypto');
 const { getThumbnailsDir, safeMkdirSync } = require('../utils/storagePaths');
+
+function extractVideoThumbnail(filePath) {
+  const tmpThumb = path.join(os.tmpdir(), `cv_thumb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.jpg`);
+  try {
+    try {
+      execFileSync('ffmpeg', ['-v', 'error', '-ss', '00:00:00.5', '-i', filePath, '-vframes', '1', '-vf', 'scale=320:-2', '-q:v', '3', tmpThumb, '-y'], { timeout: 10000 });
+    } catch (_) {
+      execFileSync('ffmpeg', ['-v', 'error', '-ss', '00:00:00', '-i', filePath, '-vframes', '1', '-vf', 'scale=320:-2', '-q:v', '3', tmpThumb, '-y'], { timeout: 10000 });
+    }
+    if (fs.existsSync(tmpThumb) && fs.statSync(tmpThumb).size > 0) {
+      return tmpThumb;
+    }
+  } catch (_) {}
+  return null;
+}
+
+function probeVideoMeta(filePath) {
+  try {
+    const raw = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,duration', '-of', 'default=noprint_wrappers=1:nokey=1', filePath], { timeout: 5000 }).toString().trim().split('\n');
+    return {
+      w: parseInt(raw[0], 10) || 0,
+      h: parseInt(raw[1], 10) || 0,
+      duration: parseFloat(raw[2]) || 0,
+    };
+  } catch (_) {
+    return { w: 0, h: 0, duration: 0 };
+  }
+}
 
 // Telegram MTProto TCP connection forced to port 443 (HTTPS) to bypass ISP port 80 restrictions/blocks
 class ConnectionTCP443 extends ConnectionTCPFull {
@@ -293,6 +323,18 @@ async function getChannelFiles(channelId, accessHash, bucketId, page = 1, perPag
         if (mimeType.startsWith('video/')) type = 'video';
         else if (mimeType.startsWith('audio/')) type = 'audio';
         else if (mimeType.startsWith('image/')) type = 'photo';
+        else if (fileName) {
+          if (/\.(mov|mp4|m4v|mkv|webm|avi|flv|wmv|ts)$/i.test(fileName)) {
+            type = 'video';
+            if (mimeType === 'application/octet-stream') mimeType = mime.lookup(fileName) || 'video/quicktime';
+          } else if (/\.(jpe?g|png|gif|webp|heic|bmp|svg)$/i.test(fileName)) {
+            type = 'photo';
+            if (mimeType === 'application/octet-stream') mimeType = mime.lookup(fileName) || 'image/jpeg';
+          } else if (/\.(mp3|wav|ogg|m4a|aac|flac)$/i.test(fileName)) {
+            type = 'audio';
+            if (mimeType === 'application/octet-stream') mimeType = mime.lookup(fileName) || 'audio/mpeg';
+          }
+        }
       }
     } else {
       continue;
@@ -479,7 +521,14 @@ async function streamThumbnail(channelId, accessHash, msgId, req, res) {
   }
 
   // 5. Fallback badge if no thumbnail available
-  const mimeType = (msg.document && msg.document.mimeType) || (msg.photo ? 'image/jpeg' : null);
+  let mimeType = (msg.document && msg.document.mimeType) || (msg.photo ? 'image/jpeg' : null);
+  if ((!mimeType || mimeType === 'application/octet-stream') && msg.document && msg.document.attributes) {
+    for (const attr of msg.document.attributes) {
+      if (attr.fileName) {
+        mimeType = mime.lookup(attr.fileName) || mimeType;
+      }
+    }
+  }
   return serveFallbackBadge(res, mimeType);
 }
 
@@ -648,22 +697,25 @@ async function uploadFileToChannel(channelId, accessHash, filePath, originalName
   const peer = getInputPeer(channelId, accessHash);
 
   const mimeType = mime.lookup(originalName) || 'application/octet-stream';
-  const isVideo = mimeType.startsWith('video/');
-  const isAudio = mimeType.startsWith('audio/');
+  const isVideo = mimeType.startsWith('video/') || /\.(mov|mp4|m4v|mkv|webm|avi|flv|wmv|ts)$/i.test(originalName);
+  const isAudio = mimeType.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|aac|flac)$/i.test(originalName);
 
   const attributes = [
     new Api.DocumentAttributeFilename({ fileName: originalName }),
   ];
 
+  let tmpThumb = null;
   if (isVideo) {
+    const meta = probeVideoMeta(filePath);
     attributes.push(
       new Api.DocumentAttributeVideo({
-        duration: 0.0,
-        w: 0,
-        h: 0,
+        duration: meta.duration,
+        w: meta.w,
+        h: meta.h,
         supportsStreaming: true,
       })
     );
+    tmpThumb = extractVideoThumbnail(filePath);
   } else if (isAudio) {
     attributes.push(
       new Api.DocumentAttributeAudio({
@@ -673,18 +725,29 @@ async function uploadFileToChannel(channelId, accessHash, filePath, originalName
     );
   }
 
-  const result = await client.sendFile(peer, {
-    file: filePath,
-    forceDocument: !mimeType.startsWith('image/'),
-    attributes,
-    progressCallback: (progress) => {
-      if (typeof progressCallback === 'function') {
-        progressCallback(progress);
-      }
-    },
-  });
+  try {
+    const sendOptions = {
+      file: filePath,
+      forceDocument: !(mimeType.startsWith('image/') || isVideo),
+      supportsStreaming: isVideo,
+      attributes,
+      progressCallback: (progress) => {
+        if (typeof progressCallback === 'function') {
+          progressCallback(progress);
+        }
+      },
+    };
+    if (tmpThumb && fs.existsSync(tmpThumb)) {
+      sendOptions.thumb = tmpThumb;
+    }
 
-  return result;
+    const result = await client.sendFile(peer, sendOptions);
+    return result;
+  } finally {
+    if (tmpThumb && fs.existsSync(tmpThumb)) {
+      try { fs.unlinkSync(tmpThumb); } catch (_) {}
+    }
+  }
 }
 
 async function deleteMessages(channelId, accessHash, msgIds) {
