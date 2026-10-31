@@ -728,7 +728,7 @@ async function uploadFileToChannel(channelId, accessHash, filePath, originalName
   try {
     const sendOptions = {
       file: filePath,
-      forceDocument: !(mimeType.startsWith('image/') || isVideo),
+      forceDocument: true,
       supportsStreaming: isVideo,
       attributes,
       progressCallback: (progress) => {

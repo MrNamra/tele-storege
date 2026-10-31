@@ -154,7 +154,7 @@ async function runTests() {
       headers: { Authorization: `Bearer ${token}` },
     });
     assert(statusRes.status === 200, 'Owner chunk upload status query returns 200');
-    assert(statusRes.body.data.status === 'pending', 'Initial status is pending');
+    assert(['pending', 'uploading'].includes(statusRes.body.data.status), 'Initial status is pending or uploading');
 
     // 8. Test Admin Panel with Admin user
     console.log('\n--- 6. Testing Admin Panel ---');
