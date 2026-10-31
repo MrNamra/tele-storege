@@ -276,13 +276,6 @@ async function getChannelFiles(channelId, accessHash, bucketId, page = 1, perPag
         const largest = sizes[sizes.length - 1];
         size = largest.size || (largest.sizes ? largest.sizes[largest.sizes.length - 1] : 0);
       }
-      // Check stripped thumb
-      for (const s of sizes) {
-        if (s.className === 'PhotoStrippedSize' && s.bytes) {
-          const stripped = extractStrippedJpeg(s.bytes);
-          if (stripped) strippedCache.set(`${channelId}_${msg.id}`, stripped);
-        }
-      }
     } else if (msg.document) {
       const doc = msg.document;
       mimeType = doc.mimeType || 'application/octet-stream';
@@ -300,15 +293,6 @@ async function getChannelFiles(channelId, accessHash, bucketId, page = 1, perPag
         if (mimeType.startsWith('video/')) type = 'video';
         else if (mimeType.startsWith('audio/')) type = 'audio';
         else if (mimeType.startsWith('image/')) type = 'photo';
-      }
-
-      if (doc.thumbs) {
-        for (const t of doc.thumbs) {
-          if (t.className === 'PhotoStrippedSize' && t.bytes) {
-            const stripped = extractStrippedJpeg(t.bytes);
-            if (stripped) strippedCache.set(`${channelId}_${msg.id}`, stripped);
-          }
-        }
       }
     } else {
       continue;
@@ -379,7 +363,24 @@ function serveFallbackBadge(res, mimeType) {
   return res.end(svg);
 }
 
-// Ultra-fast thumbnail streaming with RAM + disk cache
+function findBestThumb(sizes) {
+  if (!Array.isArray(sizes) || sizes.length === 0) return null;
+  const validSizes = sizes.filter(
+    (s) => s && (s.className === 'PhotoSize' || s.className === 'PhotoSizeProgressive' || s.className === 'PhotoCachedSize')
+  );
+  if (validSizes.length === 0) return null;
+  // 1. Prefer standard Telegram 'm' thumbnail (~320px, optimal balance of sharp quality & speed)
+  const mThumb = validSizes.find((s) => s.type === 'm');
+  if (mThumb) return mThumb;
+  // 2. Otherwise prefer size around 200px-500px
+  const mediumThumb = validSizes.find((s) => s.w && s.w >= 200 && s.w <= 500);
+  if (mediumThumb) return mediumThumb;
+  // 3. Otherwise pick size >= 200px or the largest available non-stripped size
+  const sorted = [...validSizes].sort((a, b) => (a.w || a.size || 0) - (b.w || b.size || 0));
+  return sorted.find((s) => (s.w || 0) >= 200) || sorted[sorted.length - 1];
+}
+
+// Crisp, proper-resolution thumbnail streaming with RAM + disk cache
 async function streamThumbnail(channelId, accessHash, msgId, req, res) {
   const cacheKey = `${channelId}_${msgId}`;
 
@@ -388,7 +389,7 @@ async function streamThumbnail(channelId, accessHash, msgId, req, res) {
     const cached = strippedCache.get(cacheKey);
     const buf = Buffer.isBuffer(cached) ? cached : (cached && cached.buf);
     const detectedMime = (cached && cached.mime) || detectImageMime(buf);
-    if (buf && detectedMime) {
+    if (buf && buf.length >= 3000 && detectedMime) {
       res.writeHead(200, {
         'Content-Type': detectedMime,
         'Content-Length': buf.length,
@@ -399,7 +400,7 @@ async function streamThumbnail(channelId, accessHash, msgId, req, res) {
     }
   }
 
-  // 2. Check persistent disk cache
+  // 2. Check persistent disk cache (ignore old <3KB low-res stripped thumbs)
   const cleanChannel = String(channelId).replace(/[^a-zA-Z0-9_-]/g, '');
   const thumbCacheDir = getThumbnailsDir();
   const cacheFilePath = path.join(thumbCacheDir, `thumb_${cleanChannel}_${msgId}.jpg`);
@@ -407,7 +408,7 @@ async function streamThumbnail(channelId, accessHash, msgId, req, res) {
     try {
       const buf = fs.readFileSync(cacheFilePath);
       const detectedMime = detectImageMime(buf);
-      if (buf.length > 0 && detectedMime) {
+      if (buf.length >= 3000 && detectedMime) {
         strippedCache.set(cacheKey, { buf, mime: detectedMime });
         res.writeHead(200, {
           'Content-Type': detectedMime,
@@ -417,7 +418,6 @@ async function streamThumbnail(channelId, accessHash, msgId, req, res) {
         });
         return res.end(buf);
       } else {
-        // Corrupt or non-image cache file, delete it
         try { fs.unlinkSync(cacheFilePath); } catch (_) {}
       }
     } catch (_) {}
@@ -428,37 +428,17 @@ async function streamThumbnail(channelId, accessHash, msgId, req, res) {
     return serveFallbackBadge(res, null);
   }
 
-  // 3. Check stripped thumbnail in message (<1KB instant RAM decode)
-  const thumbs = (msg.photo && msg.photo.sizes) || (msg.document && msg.document.thumbs) || [];
-  for (const t of thumbs) {
-    if (t.className === 'PhotoStrippedSize' && t.bytes) {
-      const stripped = extractStrippedJpeg(t.bytes);
-      if (stripped && isValidImageBuffer(stripped)) {
-        strippedCache.set(cacheKey, { buf: stripped, mime: 'image/jpeg' });
-        try {
-          safeMkdirSync(thumbCacheDir);
-          fs.writeFileSync(cacheFilePath, stripped);
-        } catch (_) {}
+  const photoSizes = msg.photo ? (msg.photo.sizes || []) : [];
+  const docThumbs = (msg.document && Array.isArray(msg.document.thumbs)) ? msg.document.thumbs : [];
+  const candidateSizes = photoSizes.length > 0 ? photoSizes : docThumbs;
+  const bestThumb = findBestThumb(candidateSizes);
 
-        res.writeHead(200, {
-          'Content-Type': 'image/jpeg',
-          'Content-Length': stripped.length,
-          'Cache-Control': 'public, max-age=604800, immutable',
-          'Access-Control-Allow-Origin': '*',
-        });
-        return res.end(stripped);
-      }
-    }
-  }
-
-  // 4. Download thumbnail via Telegram client for full-fidelity thumbs
-  // Guard: ONLY attempt download if there are actual downloadable thumbnails (PhotoSize) or it is a photo message.
-  // Never download full document files if thumbs is empty!
-  const hasDownloadableThumbs = msg.photo || (msg.document && Array.isArray(msg.document.thumbs) && msg.document.thumbs.length > 0);
-  if (hasDownloadableThumbs) {
+  // 3. Download proper ~320px thumbnail via Telegram client
+  if (bestThumb || msg.photo) {
     try {
       const client = await getClient();
-      const thumbBuf = await client.downloadMedia(msg, { thumb: 0 });
+      const downloadParam = bestThumb ? { thumb: bestThumb } : (msg.photo ? { thumb: 'm' } : undefined);
+      const thumbBuf = await client.downloadMedia(msg, downloadParam || {});
       if (thumbBuf && thumbBuf.length > 0 && isValidImageBuffer(thumbBuf)) {
         const detectedMime = detectImageMime(thumbBuf) || 'image/jpeg';
         strippedCache.set(cacheKey, { buf: thumbBuf, mime: detectedMime });
@@ -480,7 +460,25 @@ async function streamThumbnail(channelId, accessHash, msgId, req, res) {
     }
   }
 
-  // 5. Fallback badge if no thumbnail available or non-renderable media
+  // 4. Fallback: decode stripped thumbnail if downloadMedia wasn't possible
+  const allThumbs = [...photoSizes, ...docThumbs];
+  for (const t of allThumbs) {
+    if (t.className === 'PhotoStrippedSize' && t.bytes) {
+      const stripped = extractStrippedJpeg(t.bytes);
+      if (stripped && isValidImageBuffer(stripped)) {
+        strippedCache.set(cacheKey, { buf: stripped, mime: 'image/jpeg' });
+        res.writeHead(200, {
+          'Content-Type': 'image/jpeg',
+          'Content-Length': stripped.length,
+          'Cache-Control': 'public, max-age=604800, immutable',
+          'Access-Control-Allow-Origin': '*',
+        });
+        return res.end(stripped);
+      }
+    }
+  }
+
+  // 5. Fallback badge if no thumbnail available
   const mimeType = (msg.document && msg.document.mimeType) || (msg.photo ? 'image/jpeg' : null);
   return serveFallbackBadge(res, mimeType);
 }
