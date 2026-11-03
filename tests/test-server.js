@@ -190,6 +190,46 @@ async function runTests() {
     assert(optionsRes.status === 204, 'Stream OPTIONS preflight returns 204');
     assert(optionsRes.headers['access-control-allow-origin'] === '*', 'CORS origin allowed');
 
+    // 10. Test Native WebDAV Drive Support (Windows, macOS, Linux)
+    console.log('\n--- 8. Testing Native WebDAV Cloud Drive ---');
+    const davOptionsRes = await request({
+      path: '/webdav/',
+      method: 'OPTIONS',
+    });
+    assert(davOptionsRes.status === 200, 'WebDAV OPTIONS returns 200 OK');
+    assert(davOptionsRes.headers['dav'] === '1, 2', 'WebDAV announces DAV level 1, 2 support');
+    assert(davOptionsRes.headers['ms-author-via'] === 'DAV', 'WebDAV announces MS-Author-Via: DAV');
+
+    const davUnauthorizedRes = await request({
+      path: '/webdav/',
+      method: 'PROPFIND',
+      headers: { Depth: '0' },
+    });
+    assert(davUnauthorizedRes.status === 401, 'WebDAV PROPFIND without auth returns 401 Unauthorized');
+    assert(
+      (davUnauthorizedRes.headers['www-authenticate'] || '').includes('Basic realm="Personal Cloud Drive"'),
+      'WebDAV returns Basic realm header'
+    );
+
+    const basicAuth = Buffer.from('test@example.com:password').toString('base64');
+    const davPropfindRes = await request({
+      path: '/webdav/',
+      method: 'PROPFIND',
+      headers: {
+        Authorization: `Basic ${basicAuth}`,
+        Depth: '1',
+      },
+    });
+    assert(davPropfindRes.status === 207, 'WebDAV authenticated root PROPFIND returns 207 Multi-Status');
+    assert(
+      typeof davPropfindRes.body === 'string' && davPropfindRes.body.includes('<D:multistatus'),
+      'WebDAV returns valid XML multistatus response'
+    );
+    assert(
+      typeof davPropfindRes.body === 'string' && davPropfindRes.body.includes(encodeURIComponent(existingBucket.bucketName)),
+      'WebDAV root listing includes user buckets as native directories'
+    );
+
     console.log('\n=============================================');
     console.log(`Results: ${passed} passed, ${failed} failed`);
     console.log('=============================================');

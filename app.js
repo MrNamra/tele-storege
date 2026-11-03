@@ -14,6 +14,7 @@ const bucketRoutes = require('./routes/bucket');
 const fileRoutes = require('./routes/file');
 const uploadRoutes = require('./routes/upload');
 const adminRoutes = require('./routes/admin');
+const webdavRoutes = require('./routes/webdav');
 
 const app = express();
 
@@ -21,11 +22,15 @@ const app = express();
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
+// Native WebDAV Cloud Drive for Windows Explorer, macOS Finder & Linux Files
+// Mounted first so WebDAV OPTIONS, PROPFIND, and PUT binary streams are untouched by CORS or body parsers
+app.use('/webdav', webdavRoutes);
+
 // CORS configuration (crucial for streaming Range requests & cross-origin previews)
 app.use(
   cors({
     origin: '*',
-    methods: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PROPFIND', 'PROPPATCH', 'MKCOL', 'COPY', 'MOVE', 'LOCK', 'UNLOCK'],
     allowedHeaders: [
       'Range',
       'Authorization',
@@ -34,8 +39,15 @@ app.use(
       'Accept',
       'X-Requested-With',
       'x-bucket-password',
+      'Depth',
+      'Destination',
+      'If-Modified-Since',
+      'If-None-Match',
+      'Lock-Token',
+      'Timeout',
+      'Translate',
     ],
-    exposedHeaders: ['Content-Range', 'Content-Length', 'Accept-Ranges'],
+    exposedHeaders: ['Content-Range', 'Content-Length', 'Accept-Ranges', 'DAV', 'MS-Author-Via'],
     maxAge: 86400,
   })
 );
