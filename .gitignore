@@ -21,3 +21,5 @@ bootstrap/
 tmp/*
 storage-frontend/node_modules/
 storage-frontend/dist/
+.agents/*
+graphify-out/*
