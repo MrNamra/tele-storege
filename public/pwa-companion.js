@@ -127,35 +127,9 @@
       color: #cbd5e1;
     }
 
-    /* Floating Share Setup Badge on Desktop Header */
+    /* Floating Share Setup Badge on Desktop Header - Disabled to prevent overriding navbar buttons */
     #tg-share-pill {
-      position: fixed;
-      top: 14px;
-      right: 72px;
-      background: linear-gradient(135deg, #7c3aed, #4f46e5);
-      color: #fff;
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      border-radius: 20px;
-      padding: 6px 14px;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      z-index: 99999;
-      box-shadow: 0 4px 12px rgba(124, 58, 237, 0.35);
-      transition: transform 0.2s, box-shadow 0.2s;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
-    #tg-share-pill:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 6px 16px rgba(124, 58, 237, 0.45);
-    }
-    @media (max-width: 1024px) {
-      #tg-share-pill {
-        display: none !important;
-      }
+      display: none !important;
     }
 
     /* Modal Styling */
@@ -259,23 +233,9 @@
   `;
   document.head.appendChild(style);
 
-  // 4. Create Floating "📲 Install / Share Sheet" Pill in Header (Desktop Only)
+  // 4. Create Floating "📲 Install / Share Sheet" Pill in Header (Disabled: replaced by flex navbar button)
   function initHeaderPill() {
-    if (isStandalone || window.innerWidth <= 1024 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-      return;
-    }
-    if (document.getElementById('tg-share-pill')) return;
-    const pill = document.createElement('button');
-    pill.id = 'tg-share-pill';
-    pill.innerHTML = `
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
-        <line x1="12" y1="18" x2="12.01" y2="18"></line>
-      </svg>
-      <span>Install / Mobile Setup</span>
-    `;
-    pill.addEventListener('click', openHelpModal);
-    document.body.appendChild(pill);
+    return;
   }
 
   // 5a. iOS Smart Banner (shown only on iOS Safari when not installed yet)
