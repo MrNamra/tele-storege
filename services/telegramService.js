@@ -726,11 +726,17 @@ async function uploadFileToChannel(channelId, accessHash, filePath, originalName
   }
 
   try {
+    const fileSize = fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
+    // Multi-worker parallel chunk streaming for high-speed cloud transfer (up to 8 parallel workers)
+    const workers = fileSize > 50 * 1024 * 1024 ? 8 : (fileSize > 10 * 1024 * 1024 ? 4 : 2);
+
     const sendOptions = {
       file: filePath,
+      fileSize,
       forceDocument: true,
       supportsStreaming: isVideo,
       attributes,
+      workers,
       progressCallback: (progress) => {
         if (typeof progressCallback === 'function') {
           progressCallback(progress);
@@ -770,6 +776,7 @@ module.exports = {
   getMessageById,
   streamThumbnail,
   streamMedia,
+  serveFallbackBadge,
   uploadFileToChannel,
   deleteMessages,
 };

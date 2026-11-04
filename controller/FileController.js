@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const mime = require('mime-types');
 const db = require('../config/db');
 const telegramService = require('../services/telegramService');
 const { processNextJob } = require('../services/queueService');
@@ -134,9 +135,20 @@ const removeFile = async (req, res) => {
       return res.status(422).json({ status: false, message: 'file_id is required.' });
     }
 
-    const decryptedMsgIds = fileIds
-      .map((id) => safeDecryptId(id) || parseInt(id, 10))
-      .filter((id) => !isNaN(id) && id > 0);
+    const decryptedMsgIds = [];
+    for (const id of fileIds) {
+      if (typeof id === 'string' && id.startsWith('queue_')) {
+        const qId = parseInt(id.replace('queue_', ''), 10);
+        const job = db.prepare('SELECT * FROM upload_queues WHERE id = ?').get(qId);
+        if (job) {
+          db.prepare("UPDATE upload_queues SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(job.id);
+          try { if (fs.existsSync(job.file_path)) fs.unlinkSync(job.file_path); } catch (_) {}
+        }
+      } else {
+        const dId = safeDecryptId(id) || (isFinite(id) ? parseInt(id, 10) : null);
+        if (dId && !isNaN(dId) && dId > 0) decryptedMsgIds.push(dId);
+      }
+    }
 
     if (decryptedMsgIds.length > 0) {
       await telegramService.deleteMessages(bucket.channel_id, bucket.access_hash, decryptedMsgIds);
@@ -180,6 +192,23 @@ const streamFile = async (req, res) => {
       return res.status(403).json({ status: false, message: 'Access denied.' });
     }
 
+    if (typeof rawId === 'string' && rawId.startsWith('queue_')) {
+      const qId = parseInt(rawId.replace('queue_', ''), 10);
+      const job = db.prepare('SELECT * FROM upload_queues WHERE id = ?').get(qId);
+      if (job && fs.existsSync(job.file_path)) {
+        const stats = fs.statSync(job.file_path);
+        const mimeType = mime.lookup(job.file_name) || 'application/octet-stream';
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Content-Length', stats.size);
+        res.setHeader('Accept-Ranges', 'bytes');
+        const isDownload = req.query.dl === '1' || req.query.download === 'true';
+        if (isDownload) {
+          res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(job.file_name)}"`);
+        }
+        return fs.createReadStream(job.file_path).pipe(res);
+      }
+    }
+
     const msgId = safeDecryptId(rawId, bucket.id) || (isFinite(rawId) ? parseInt(rawId, 10) : null);
     if (!msgId) {
       return res.status(404).json({ status: false, message: 'Invalid file ID.' });
@@ -221,6 +250,20 @@ const downloadFile = async (req, res) => {
 
     if (!canAccessBucket(req, bucket)) {
       return res.status(403).json({ status: false, message: 'Access denied.' });
+    }
+
+    if (typeof rawId === 'string' && rawId.startsWith('queue_')) {
+      const qId = parseInt(rawId.replace('queue_', ''), 10);
+      const job = db.prepare('SELECT * FROM upload_queues WHERE id = ?').get(qId);
+      if (job && fs.existsSync(job.file_path)) {
+        const stats = fs.statSync(job.file_path);
+        const mimeType = mime.lookup(job.file_name) || 'application/octet-stream';
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Content-Length', stats.size);
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(job.file_name)}"`);
+        return fs.createReadStream(job.file_path).pipe(res);
+      }
     }
 
     const msgId = safeDecryptId(rawId, bucket.id) || (isFinite(rawId) ? parseInt(rawId, 10) : null);

@@ -8,7 +8,11 @@
     "test": "node tests/test-server.js",
     "telegram:login": "node scripts/telegram-login.js",
     "build:frontend": "cd storage-frontend && npm run build",
-    "graphify": "graphify update . --no-cluster",
+    "graphify": "graphify update .",
+    "graphify:query": "graphify query",
+    "graphify:explain": "graphify explain",
+    "graphify:path": "graphify path",
+    "graphify:wiki": "graphify export wiki",
     "graphify:html": "graphify export html",
     "preinstall": "node -e \"require('fs').existsSync('.git/hooks/code-guardian/git-hooks/checkInstall.cjs') && require('child_process').execFileSync('node', ['.git/hooks/code-guardian/git-hooks/checkInstall.cjs'], {stdio:'inherit'})\""
   },

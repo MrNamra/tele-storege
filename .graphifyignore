@@ -1,0 +1,8 @@
+frontend/
+storage-frontend/dist/
+dist/
+build/
+*.min.js
+storage/
+vendor/
+node_modules/

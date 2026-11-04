@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const mime = require('mime-types');
 const db = require('../config/db');
 const telegramService = require('../services/telegramService');
 const { canAccessBucket } = require('../middleware/AuthMiddleware');
@@ -278,6 +279,30 @@ const displayBucket = async (req, res) => {
     );
 
     let files = channelData.files;
+
+    if (page === 1) {
+      const activeJobs = db.prepare(
+        "SELECT * FROM upload_queues WHERE bucket_id = ? AND status IN ('pending', 'processing', 'uploading_to_cloud') ORDER BY id DESC"
+      ).all(bucket.id);
+
+      if (activeJobs.length > 0) {
+        const queuedFiles = activeJobs.map((job) => ({
+          msg_id: `queue_${job.id}`,
+          file_name: job.file_name,
+          size: job.file_size,
+          date: Math.floor(new Date(job.created_at || Date.now()).getTime() / 1000),
+          mime_type: mime.lookup(job.file_name) || 'application/octet-stream',
+          is_queued: true,
+          queue_status: job.status,
+          queue_progress: job.progress || 0,
+        }));
+
+        const existingNames = new Set(files.map((f) => f.file_name));
+        const newQueued = queuedFiles.filter((q) => !existingNames.has(q.file_name));
+        files = [...newQueued, ...files];
+      }
+    }
+
     if (search) {
       files = files.filter((f) => f.file_name && f.file_name.toLowerCase().includes(search));
     }

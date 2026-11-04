@@ -7,7 +7,8 @@ const bcrypt = require('bcryptjs');
 const mime = require('mime-types');
 const db = require('../config/db');
 const telegramService = require('../services/telegramService');
-const { getTmpDir, safeMkdirSync } = require('../utils/storagePaths');
+const { getTmpDir, getAssembledDir, safeMkdirSync } = require('../utils/storagePaths');
+const { processNextJob } = require('../services/queueService');
 const { safeDecryptId } = require('../utils/crypto');
 
 function escapeXml(str) {
@@ -175,10 +176,31 @@ router.all('*', async (req, res, next) => {
             1000
           );
 
+          // Merge active uploads from upload_queues so uploaded files appear immediately in drive
+          const pendingUploads = db.prepare(
+            "SELECT * FROM upload_queues WHERE bucket_id = ? AND status IN ('pending', 'processing', 'uploading_to_cloud') ORDER BY id DESC"
+          ).all(bucket.id);
+
+          const fileMap = new Map();
           for (const f of channelData.files) {
+            fileMap.set(f.file_name, {
+              file_name: f.file_name,
+              size: f.size || 0,
+              mime_type: f.mime_type || mime.lookup(f.file_name) || 'application/octet-stream',
+              date: f.date ? new Date(f.date * 1000).toUTCString() : new Date().toUTCString(),
+            });
+          }
+          for (const p of pendingUploads) {
+            fileMap.set(p.file_name, {
+              file_name: p.file_name,
+              size: p.file_size || 0,
+              mime_type: mime.lookup(p.file_name) || 'application/octet-stream',
+              date: new Date(p.created_at || Date.now()).toUTCString(),
+            });
+          }
+
+          for (const f of fileMap.values()) {
             const fHref = `${prefix}/${encodeURIComponent(bucket.bucketName)}/${encodeURIComponent(f.file_name)}`;
-            const modified = f.date ? new Date(f.date * 1000).toUTCString() : new Date().toUTCString();
-            const contentType = f.mime_type || mime.lookup(f.file_name) || 'application/octet-stream';
 
             xmlResponses += `
   <D:response>
@@ -187,9 +209,9 @@ router.all('*', async (req, res, next) => {
       <D:prop>
         <D:displayname>${escapeXml(f.file_name)}</D:displayname>
         <D:getcontentlength>${f.size || 0}</D:getcontentlength>
-        <D:getcontenttype>${escapeXml(contentType)}</D:getcontenttype>
+        <D:getcontenttype>${escapeXml(f.mime_type)}</D:getcontenttype>
         <D:resourcetype/>
-        <D:getlastmodified>${modified}</D:getlastmodified>
+        <D:getlastmodified>${f.date}</D:getlastmodified>
       </D:prop>
       <D:status>HTTP/1.1 200 OK</D:status>
     </D:propstat>
@@ -205,14 +227,34 @@ router.all('*', async (req, res, next) => {
       const bucket = db.prepare('SELECT * FROM buckets WHERE user_id = ? AND (bucketName = ? OR id = ?)').get(req.user.id, bucketName, bucketName);
       if (!bucket) return res.status(404).end();
 
-      const channelData = await telegramService.getChannelFiles(bucket.channel_id, bucket.access_hash, bucket.id, 1, 1000);
-      const f = channelData.files.find((item) => item.file_name === fileName);
+      const pending = db.prepare(
+        "SELECT * FROM upload_queues WHERE bucket_id = ? AND file_name = ? AND status IN ('pending', 'processing', 'uploading_to_cloud') ORDER BY id DESC LIMIT 1"
+      ).get(bucket.id, fileName);
+
+      let f = null;
+      if (pending) {
+        f = {
+          file_name: pending.file_name,
+          size: pending.file_size || 0,
+          mime_type: mime.lookup(pending.file_name) || 'application/octet-stream',
+          date: new Date(pending.created_at || Date.now()).toUTCString(),
+        };
+      } else {
+        const channelData = await telegramService.getChannelFiles(bucket.channel_id, bucket.access_hash, bucket.id, 1, 1000);
+        const item = channelData.files.find((i) => i.file_name === fileName);
+        if (item) {
+          f = {
+            file_name: item.file_name,
+            size: item.size || 0,
+            mime_type: item.mime_type || mime.lookup(item.file_name) || 'application/octet-stream',
+            date: item.date ? new Date(item.date * 1000).toUTCString() : new Date().toUTCString(),
+          };
+        }
+      }
+
       if (!f) return res.status(404).end();
 
       const fHref = `${prefix}/${encodeURIComponent(bucket.bucketName)}/${encodeURIComponent(f.file_name)}`;
-      const modified = f.date ? new Date(f.date * 1000).toUTCString() : new Date().toUTCString();
-      const contentType = f.mime_type || mime.lookup(f.file_name) || 'application/octet-stream';
-
       xmlResponses += `
   <D:response>
     <D:href>${fHref}</D:href>
@@ -220,9 +262,9 @@ router.all('*', async (req, res, next) => {
       <D:prop>
         <D:displayname>${escapeXml(f.file_name)}</D:displayname>
         <D:getcontentlength>${f.size || 0}</D:getcontentlength>
-        <D:getcontenttype>${escapeXml(contentType)}</D:getcontenttype>
+        <D:getcontenttype>${escapeXml(f.mime_type)}</D:getcontenttype>
         <D:resourcetype/>
-        <D:getlastmodified>${modified}</D:getlastmodified>
+        <D:getlastmodified>${f.date}</D:getlastmodified>
       </D:prop>
       <D:status>HTTP/1.1 200 OK</D:status>
     </D:propstat>
@@ -262,7 +304,13 @@ router.all('*', async (req, res, next) => {
         const bucket = buckets.find((b) => b.bucketName === bucketName || String(b.id) === bucketName);
         if (!bucket) return res.status(404).send('Drive not found');
         const channelData = await telegramService.getChannelFiles(bucket.channel_id, bucket.access_hash, bucket.id, 1, 1000);
-        listHtml = channelData.files.map((f) => `<li>📄 <a href="${prefix}/${encodeURIComponent(bucket.bucketName)}/${encodeURIComponent(f.file_name)}">${escapeXml(f.file_name)}</a> (${f.size} bytes)</li>`).join('\n');
+        const pendingUploads = db.prepare(
+          "SELECT * FROM upload_queues WHERE bucket_id = ? AND status IN ('pending', 'processing', 'uploading_to_cloud') ORDER BY id DESC"
+        ).all(bucket.id);
+        const map = new Map();
+        for (const f of channelData.files) map.set(f.file_name, f.size);
+        for (const p of pendingUploads) map.set(p.file_name, p.file_size);
+        listHtml = Array.from(map.entries()).map(([name, size]) => `<li>📄 <a href="${prefix}/${encodeURIComponent(bucket.bucketName)}/${encodeURIComponent(name)}">${escapeXml(name)}</a> (${size} bytes)</li>`).join('\n');
       }
 
       return res.status(200).send(`
@@ -281,6 +329,59 @@ router.all('*', async (req, res, next) => {
     // Specific file requested
     const bucket = db.prepare('SELECT * FROM buckets WHERE user_id = ? AND (bucketName = ? OR id = ?)').get(req.user.id, bucketName, bucketName);
     if (!bucket) return res.status(404).send('Drive not found');
+
+    // If file is still pending/processing in upload queue, stream directly from staged local disk
+    const pending = db.prepare(
+      "SELECT * FROM upload_queues WHERE bucket_id = ? AND file_name = ? AND status IN ('pending', 'processing', 'uploading_to_cloud') ORDER BY id DESC LIMIT 1"
+    ).get(bucket.id, fileName);
+
+    if (pending && fs.existsSync(pending.file_path)) {
+      const stats = fs.statSync(pending.file_path);
+      const fileSize = stats.size;
+      const contentType = mime.lookup(fileName) || 'application/octet-stream';
+      const lastModified = stats.mtime.toUTCString();
+
+      if (req.method === 'HEAD') {
+        res.set({
+          'Content-Type': contentType,
+          'Content-Length': fileSize,
+          'Accept-Ranges': 'bytes',
+          'Last-Modified': lastModified,
+        });
+        return res.status(200).end();
+      }
+
+      const range = req.headers.range;
+      if (range) {
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+        if (start >= fileSize || end >= fileSize || start > end) {
+          res.set('Content-Range', `bytes */${fileSize}`);
+          return res.status(416).end();
+        }
+
+        const chunksize = end - start + 1;
+        res.status(206);
+        res.set({
+          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunksize,
+          'Content-Type': contentType,
+          'Last-Modified': lastModified,
+        });
+        return fs.createReadStream(pending.file_path, { start, end }).pipe(res);
+      }
+
+      res.set({
+        'Content-Length': fileSize,
+        'Content-Type': contentType,
+        'Accept-Ranges': 'bytes',
+        'Last-Modified': lastModified,
+      });
+      return fs.createReadStream(pending.file_path).pipe(res);
+    }
 
     const channelData = await telegramService.getChannelFiles(bucket.channel_id, bucket.access_hash, bucket.id, 1, 1000);
     const file = channelData.files.find((f) => f.file_name === fileName);
@@ -321,13 +422,14 @@ router.all('*', async (req, res, next) => {
       return res.status(404).send('Destination drive not found');
     }
 
-    // Pipe incoming binary request directly to temporary file
-    const tmpDir = getTmpDir();
-    safeMkdirSync(tmpDir);
+    // Pipe incoming binary stream directly to assembled storage directory
+    const uploadId = crypto.randomUUID();
     const safeBaseName = path.basename(fileName).replace(/[^a-zA-Z0-9._-]/g, '_');
-    const tempFilePath = path.join(tmpDir, `dav_${Date.now()}_${crypto.randomBytes(4).toString('hex')}_${safeBaseName}`);
+    const targetDir = getAssembledDir();
+    safeMkdirSync(targetDir);
+    const finalPath = path.join(targetDir, `dav_${uploadId}_${safeBaseName}`);
 
-    const writeStream = fs.createWriteStream(tempFilePath);
+    const writeStream = fs.createWriteStream(finalPath);
     req.pipe(writeStream);
 
     await new Promise((resolve, reject) => {
@@ -336,15 +438,24 @@ router.all('*', async (req, res, next) => {
       req.on('error', reject);
     });
 
-    // Upload directly to cloud storage channel
-    await telegramService.uploadFileToChannel(
-      bucket.channel_id,
-      bucket.access_hash,
-      tempFilePath,
-      fileName
-    );
+    const stats = fs.statSync(finalPath);
 
-    try { fs.unlinkSync(tempFilePath); } catch (_) {}
+    // Cancel any previous queued job for same file in this bucket
+    const existingQueue = db.prepare(
+      "SELECT * FROM upload_queues WHERE bucket_id = ? AND file_name = ? AND status IN ('pending', 'processing', 'uploading_to_cloud')"
+    ).all(bucket.id, fileName);
+    for (const eq of existingQueue) {
+      db.prepare("UPDATE upload_queues SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(eq.id);
+      try { if (fs.existsSync(eq.file_path)) fs.unlinkSync(eq.file_path); } catch (_) {}
+    }
+
+    // Insert into upload_queues for fast background cloud synchronization
+    db.prepare(
+      `INSERT INTO upload_queues (upload_id, bucket_id, channel_id, file_path, file_name, file_size, status, progress, user_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+    ).run(uploadId, bucket.id, bucket.channel_id, finalPath, fileName, stats.size, req.user.id);
+
+    processNextJob();
 
     const prefix = req.baseUrl || '/webdav';
     res.set({
@@ -371,6 +482,17 @@ router.all('*', async (req, res, next) => {
 
     // Case A: Delete file
     if (fileName) {
+      const pending = db.prepare(
+        "SELECT * FROM upload_queues WHERE bucket_id = ? AND file_name = ? AND status IN ('pending', 'processing', 'uploading_to_cloud')"
+      ).all(bucket.id, fileName);
+
+      for (const job of pending) {
+        db.prepare("UPDATE upload_queues SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(job.id);
+        try {
+          if (fs.existsSync(job.file_path)) fs.unlinkSync(job.file_path);
+        } catch (_) {}
+      }
+
       const channelData = await telegramService.getChannelFiles(bucket.channel_id, bucket.access_hash, bucket.id, 1, 1000);
       const file = channelData.files.find((f) => f.file_name === fileName);
       if (file) {

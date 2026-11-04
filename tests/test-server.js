@@ -230,6 +230,67 @@ async function runTests() {
       'WebDAV root listing includes user buckets as native directories'
     );
 
+    // 11. Test WebDAV Instant Large File PUT & Immediate PROPFIND Presence
+    console.log('\n--- 9. Testing WebDAV Instant Upload & Immediate Visibility ---');
+    const testFileName = `test_large_document_${Date.now()}.txt`;
+    const testFileContent = 'Hello Personal Cloud Drive WebDAV Instant Sync! ' + 'x'.repeat(1024 * 64); // 64KB sample
+    const davPutRes = await request(
+      {
+        path: `/webdav/${encodeURIComponent(existingBucket.bucketName)}/${encodeURIComponent(testFileName)}`,
+        method: 'PUT',
+        headers: {
+          Authorization: `Basic ${basicAuth}`,
+          'Content-Type': 'text/plain',
+        },
+      },
+      testFileContent
+    );
+    assert(davPutRes.status === 201, 'WebDAV PUT returns 201 Created immediately without blocking');
+    assert(
+      (davPutRes.headers['location'] || '').includes(encodeURIComponent(testFileName)),
+      'WebDAV PUT returns Location header with file URI'
+    );
+
+    // PROPFIND on bucket collection immediately reflects the newly uploaded file!
+    const davBucketPropfindRes = await request({
+      path: `/webdav/${encodeURIComponent(existingBucket.bucketName)}/`,
+      method: 'PROPFIND',
+      headers: {
+        Authorization: `Basic ${basicAuth}`,
+        Depth: '1',
+      },
+    });
+    assert(davBucketPropfindRes.status === 207, 'WebDAV bucket PROPFIND returns 207 Multi-Status');
+    assert(
+      typeof davBucketPropfindRes.body === 'string' && davBucketPropfindRes.body.includes(encodeURIComponent(testFileName)),
+      'WebDAV PROPFIND lists the newly uploaded file immediately without waiting for cloud relay'
+    );
+
+    // GET & HEAD on the newly uploaded file reads directly from staged storage
+    const davHeadRes = await request({
+      path: `/webdav/${encodeURIComponent(existingBucket.bucketName)}/${encodeURIComponent(testFileName)}`,
+      method: 'HEAD',
+      headers: { Authorization: `Basic ${basicAuth}` },
+    });
+    assert(davHeadRes.status === 200, 'WebDAV HEAD on staged file returns 200 OK');
+    assert(parseInt(davHeadRes.headers['content-length'], 10) === Buffer.byteLength(testFileContent), 'Content-Length matches exactly');
+
+    const davGetRes = await request({
+      path: `/webdav/${encodeURIComponent(existingBucket.bucketName)}/${encodeURIComponent(testFileName)}`,
+      method: 'GET',
+      headers: { Authorization: `Basic ${basicAuth}` },
+    });
+    assert(davGetRes.status === 200, 'WebDAV GET on staged file returns 200 OK');
+    assert(davGetRes.body === testFileContent, 'WebDAV GET content matches staged payload');
+
+    // DELETE on the staged file
+    const davDelRes = await request({
+      path: `/webdav/${encodeURIComponent(existingBucket.bucketName)}/${encodeURIComponent(testFileName)}`,
+      method: 'DELETE',
+      headers: { Authorization: `Basic ${basicAuth}` },
+    });
+    assert(davDelRes.status === 204, 'WebDAV DELETE returns 204 No Content and cancels queued upload');
+
     console.log('\n=============================================');
     console.log(`Results: ${passed} passed, ${failed} failed`);
     console.log('=============================================');
