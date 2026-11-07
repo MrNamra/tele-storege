@@ -196,12 +196,24 @@ const streamFile = async (req, res) => {
       const qId = parseInt(rawId.replace('queue_', ''), 10);
       const job = db.prepare('SELECT * FROM upload_queues WHERE id = ?').get(qId);
       if (job && fs.existsSync(job.file_path)) {
+        const isDownload = req.query.dl === '1' || req.query.download === 'true';
+        if (!isDownload && telegramService.isHeicFile(job.file_name)) {
+          const prevJpg = telegramService.convertHeicToJpeg(job.file_path, 2048);
+          if (prevJpg && fs.existsSync(prevJpg)) {
+            const buf = fs.readFileSync(prevJpg);
+            try { fs.unlinkSync(prevJpg); } catch (_) {}
+            res.setHeader('Content-Type', 'image/jpeg');
+            res.setHeader('Content-Length', buf.length);
+            res.setHeader('Cache-Control', 'no-cache');
+            return res.end(buf);
+          }
+        }
+
         const stats = fs.statSync(job.file_path);
         const mimeType = mime.lookup(job.file_name) || 'application/octet-stream';
         res.setHeader('Content-Type', mimeType);
         res.setHeader('Content-Length', stats.size);
         res.setHeader('Accept-Ranges', 'bytes');
-        const isDownload = req.query.dl === '1' || req.query.download === 'true';
         if (isDownload) {
           res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(job.file_name)}"`);
         }
@@ -306,6 +318,36 @@ const streamThumbnail = async (req, res) => {
 
     if (!canAccessBucket(req, bucket)) {
       return res.status(403).json({ status: false, message: 'Access denied.' });
+    }
+
+    if (typeof rawId === 'string' && rawId.startsWith('queue_')) {
+      const qId = parseInt(rawId.replace('queue_', ''), 10);
+      const job = db.prepare('SELECT * FROM upload_queues WHERE id = ?').get(qId);
+      if (job && fs.existsSync(job.file_path)) {
+        if (telegramService.isHeicFile(job.file_name)) {
+          const thumbJpg = telegramService.extractHeicThumbnail(job.file_path, 400);
+          if (thumbJpg && fs.existsSync(thumbJpg)) {
+            const buf = fs.readFileSync(thumbJpg);
+            try { fs.unlinkSync(thumbJpg); } catch (_) {}
+            res.writeHead(200, {
+              'Content-Type': 'image/jpeg',
+              'Content-Length': buf.length,
+              'Cache-Control': 'no-cache',
+              'Access-Control-Allow-Origin': '*',
+            });
+            return res.end(buf);
+          }
+        } else if (/\.(jpe?g|png|gif|webp|svg)$/i.test(job.file_name)) {
+          const buf = fs.readFileSync(job.file_path);
+          res.writeHead(200, {
+            'Content-Type': mime.lookup(job.file_name) || 'image/jpeg',
+            'Content-Length': buf.length,
+            'Cache-Control': 'no-cache',
+            'Access-Control-Allow-Origin': '*',
+          });
+          return res.end(buf);
+        }
+      }
     }
 
     const msgId = safeDecryptId(rawId, bucket.id) || (isFinite(rawId) ? parseInt(rawId, 10) : null);

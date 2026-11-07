@@ -295,6 +295,8 @@ const displayBucket = async (req, res) => {
           is_queued: true,
           queue_status: job.status,
           queue_progress: job.progress || 0,
+          thumbnail: `/t/${bucket.id}/queue_${job.id}`,
+          stream_url: `/s/${bucket.id}/queue_${job.id}`,
         }));
 
         const existingNames = new Set(files.map((f) => f.file_name));

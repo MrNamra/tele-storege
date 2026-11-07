@@ -11,6 +11,7 @@ const { execFileSync } = require('child_process');
 const mime = require('mime-types');
 const { safeEncryptId, safeDecryptId, isCompactSignedIdForBucket } = require('../utils/crypto');
 const { getThumbnailsDir, safeMkdirSync } = require('../utils/storagePaths');
+const { isHeicFile, extractHeicThumbnail, convertHeicToJpeg } = require('../utils/heicProcessor');
 
 function extractVideoThumbnail(filePath) {
   const tmpThumb = path.join(os.tmpdir(), `cv_thumb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.jpg`);
@@ -327,7 +328,7 @@ async function getChannelFiles(channelId, accessHash, bucketId, page = 1, perPag
           if (/\.(mov|mp4|m4v|mkv|webm|avi|flv|wmv|ts)$/i.test(fileName)) {
             type = 'video';
             if (mimeType === 'application/octet-stream') mimeType = mime.lookup(fileName) || 'video/quicktime';
-          } else if (/\.(jpe?g|png|gif|webp|heic|bmp|svg)$/i.test(fileName)) {
+          } else if (/\.(jpe?g|png|gif|webp|heic|heif|bmp|svg)$/i.test(fileName)) {
             type = 'photo';
             if (mimeType === 'application/octet-stream') mimeType = mime.lookup(fileName) || 'image/jpeg';
           } else if (/\.(mp3|wav|ogg|m4a|aac|flac)$/i.test(fileName)) {
@@ -520,7 +521,67 @@ async function streamThumbnail(channelId, accessHash, msgId, req, res) {
     }
   }
 
-  // 5. Fallback badge if no thumbnail available
+  // 5. If document is a HEIC/HEIF file and Telegram had no thumbnail, generate it via heif-thumbnailer
+  let docFileName = '';
+  if (msg.document && msg.document.attributes) {
+    for (const attr of msg.document.attributes) {
+      if (attr.fileName) docFileName = attr.fileName;
+    }
+  }
+
+  if (isHeicFile(docFileName)) {
+    // Check if preview JPEG exists in disk cache
+    const previewFilePath = path.join(thumbCacheDir, `preview_${cleanChannel}_${msgId}.jpg`);
+    if (fs.existsSync(previewFilePath)) {
+      const thumbJpg = extractHeicThumbnail(previewFilePath, 400);
+      if (thumbJpg && fs.existsSync(thumbJpg)) {
+        const buf = fs.readFileSync(thumbJpg);
+        safeMkdirSync(thumbCacheDir);
+        fs.writeFileSync(cacheFilePath, buf);
+        strippedCache.set(cacheKey, { buf, mime: 'image/jpeg' });
+        try { fs.unlinkSync(thumbJpg); } catch (_) {}
+        res.writeHead(200, {
+          'Content-Type': 'image/jpeg',
+          'Content-Length': buf.length,
+          'Cache-Control': 'public, max-age=604800, immutable',
+          'Access-Control-Allow-Origin': '*',
+        });
+        return res.end(buf);
+      }
+    }
+
+    // Otherwise download message and extract thumbnail
+    const tmpHeic = path.join(os.tmpdir(), `dl_heic_th_${Date.now()}_${msgId}.heic`);
+    try {
+      const client = await getClient();
+      await client.downloadMedia(msg, { outputFile: tmpHeic });
+      if (fs.existsSync(tmpHeic)) {
+        const thumbJpg = extractHeicThumbnail(tmpHeic, 400);
+        if (thumbJpg && fs.existsSync(thumbJpg)) {
+          const buf = fs.readFileSync(thumbJpg);
+          safeMkdirSync(thumbCacheDir);
+          fs.writeFileSync(cacheFilePath, buf);
+          strippedCache.set(cacheKey, { buf, mime: 'image/jpeg' });
+          try { fs.unlinkSync(thumbJpg); } catch (_) {}
+          try { fs.unlinkSync(tmpHeic); } catch (_) {}
+
+          res.writeHead(200, {
+            'Content-Type': 'image/jpeg',
+            'Content-Length': buf.length,
+            'Cache-Control': 'public, max-age=604800, immutable',
+            'Access-Control-Allow-Origin': '*',
+          });
+          return res.end(buf);
+        }
+      }
+    } catch (err) {
+      console.warn(`[Thumbnail] HEIC extraction error for ${channelId}/${msgId}:`, err.message);
+    } finally {
+      try { if (fs.existsSync(tmpHeic)) fs.unlinkSync(tmpHeic); } catch (_) {}
+    }
+  }
+
+  // 6. Fallback badge if no thumbnail available
   let mimeType = (msg.document && msg.document.mimeType) || (msg.photo ? 'image/jpeg' : null);
   if ((!mimeType || mimeType === 'application/octet-stream') && msg.document && msg.document.attributes) {
     for (const attr of msg.document.attributes) {
@@ -563,6 +624,60 @@ async function streamMedia(channelId, accessHash, msgId, req, res, forceDownload
   }
 
   const disposition = forceDownload ? 'attachment' : 'inline';
+
+  // Support HEIC web-preview transcoding (when viewed in browser or requested as JPG)
+  const isHeic = isHeicFile(fileName);
+  const wantsJpg = req.query && (req.query.format === 'jpg' || req.query.format === 'jpeg');
+
+  if (isHeic && (!forceDownload || wantsJpg)) {
+    const cleanChannel = String(channelId).replace(/[^a-zA-Z0-9_-]/g, '');
+    const thumbCacheDir = getThumbnailsDir();
+    const previewFilePath = path.join(thumbCacheDir, `preview_${cleanChannel}_${msgId}.jpg`);
+
+    if (fs.existsSync(previewFilePath) && fs.statSync(previewFilePath).size > 0) {
+      const stats = fs.statSync(previewFilePath);
+      const outName = wantsJpg ? fileName.replace(/\.(heic|heif)$/i, '.jpg') : fileName;
+      res.writeHead(200, {
+        'Content-Type': 'image/jpeg',
+        'Content-Length': stats.size,
+        'Cache-Control': 'public, max-age=604800, immutable',
+        'Content-Disposition': `${disposition}; filename="${encodeURIComponent(outName)}"`,
+        'Access-Control-Allow-Origin': '*',
+      });
+      return fs.createReadStream(previewFilePath).pipe(res);
+    }
+
+    // Generate high-res JPEG preview
+    const tmpHeic = path.join(os.tmpdir(), `dl_heic_prev_${Date.now()}_${msgId}.heic`);
+    try {
+      const client = await getClient();
+      await client.downloadMedia(msg, { outputFile: tmpHeic });
+      if (fs.existsSync(tmpHeic)) {
+        const prevJpg = convertHeicToJpeg(tmpHeic, 2048);
+        if (prevJpg && fs.existsSync(prevJpg)) {
+          safeMkdirSync(thumbCacheDir);
+          fs.copyFileSync(prevJpg, previewFilePath);
+          try { fs.unlinkSync(prevJpg); } catch (_) {}
+          try { fs.unlinkSync(tmpHeic); } catch (_) {}
+
+          const stats = fs.statSync(previewFilePath);
+          const outName = wantsJpg ? fileName.replace(/\.(heic|heif)$/i, '.jpg') : fileName;
+          res.writeHead(200, {
+            'Content-Type': 'image/jpeg',
+            'Content-Length': stats.size,
+            'Cache-Control': 'public, max-age=604800, immutable',
+            'Content-Disposition': `${disposition}; filename="${encodeURIComponent(outName)}"`,
+            'Access-Control-Allow-Origin': '*',
+          });
+          return fs.createReadStream(previewFilePath).pipe(res);
+        }
+      }
+    } catch (err) {
+      console.warn(`[HEIC] Preview conversion error for ${channelId}/${msgId}:`, err.message);
+    } finally {
+      try { if (fs.existsSync(tmpHeic)) fs.unlinkSync(tmpHeic); } catch (_) {}
+    }
+  }
 
   // Support HEAD request for probing metadata (safari, chrome, video players)
   if (req.method === 'HEAD') {
@@ -699,6 +814,7 @@ async function uploadFileToChannel(channelId, accessHash, filePath, originalName
   const mimeType = mime.lookup(originalName) || 'application/octet-stream';
   const isVideo = mimeType.startsWith('video/') || /\.(mov|mp4|m4v|mkv|webm|avi|flv|wmv|ts)$/i.test(originalName);
   const isAudio = mimeType.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|aac|flac)$/i.test(originalName);
+  const isHeic = isHeicFile(originalName);
 
   const attributes = [
     new Api.DocumentAttributeFilename({ fileName: originalName }),
@@ -723,6 +839,8 @@ async function uploadFileToChannel(channelId, accessHash, filePath, originalName
         voice: false,
       })
     );
+  } else if (isHeic) {
+    tmpThumb = extractHeicThumbnail(filePath, 400);
   }
 
   try {
@@ -748,6 +866,14 @@ async function uploadFileToChannel(channelId, accessHash, filePath, originalName
     }
 
     const result = await client.sendFile(peer, sendOptions);
+    if (result && result.id && tmpThumb && fs.existsSync(tmpThumb)) {
+      try {
+        const cleanChannel = String(channelId).replace(/[^a-zA-Z0-9_-]/g, '');
+        const thumbCacheDir = getThumbnailsDir();
+        safeMkdirSync(thumbCacheDir);
+        fs.copyFileSync(tmpThumb, path.join(thumbCacheDir, `thumb_${cleanChannel}_${result.id}.jpg`));
+      } catch (_) {}
+    }
     return result;
   } finally {
     if (tmpThumb && fs.existsSync(tmpThumb)) {
@@ -779,4 +905,7 @@ module.exports = {
   serveFallbackBadge,
   uploadFileToChannel,
   deleteMessages,
+  isHeicFile,
+  extractHeicThumbnail,
+  convertHeicToJpeg,
 };
