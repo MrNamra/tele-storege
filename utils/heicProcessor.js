@@ -17,11 +17,21 @@ function extractHeicThumbnail(filePath, size = 400) {
   if (!fs.existsSync(filePath)) return null;
   const tmpPng = path.join(os.tmpdir(), `heic_th_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.png`);
   const tmpJpg = path.join(os.tmpdir(), `heic_th_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.jpg`);
+  const opts = { timeout: 10000, stdio: ['ignore', 'pipe', 'pipe'] };
   try {
-    execFileSync('heif-thumbnailer', ['-s', String(size), '-p', filePath, tmpPng], { timeout: 10000 });
-    if (fs.existsSync(tmpPng) && fs.statSync(tmpPng).size > 0) {
-      execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', tmpPng, '-q:v', '3', tmpJpg], { timeout: 6000 });
-      try { fs.unlinkSync(tmpPng); } catch (_) {}
+    try {
+      execFileSync('heif-thumbnailer', ['-s', String(size), '-p', filePath, tmpPng], opts);
+      if (fs.existsSync(tmpPng) && fs.statSync(tmpPng).size > 0) {
+        execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', tmpPng, '-q:v', '3', tmpJpg], opts);
+        try { fs.unlinkSync(tmpPng); } catch (_) {}
+        if (fs.existsSync(tmpJpg) && fs.statSync(tmpJpg).size > 0) {
+          return tmpJpg;
+        }
+      }
+    } catch (_) {
+      try { if (fs.existsSync(tmpPng)) fs.unlinkSync(tmpPng); } catch (_) {}
+      // Fallback to heif-convert directly
+      execFileSync('heif-convert', ['-q', '80', filePath, tmpJpg], opts);
       if (fs.existsSync(tmpJpg) && fs.statSync(tmpJpg).size > 0) {
         return tmpJpg;
       }
@@ -43,11 +53,21 @@ function convertHeicToJpeg(filePath, maxSize = 2048) {
   if (!fs.existsSync(filePath)) return null;
   const tmpPng = path.join(os.tmpdir(), `heic_pv_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.png`);
   const tmpJpg = path.join(os.tmpdir(), `heic_pv_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.jpg`);
+  const opts = { timeout: 15000, stdio: ['ignore', 'pipe', 'pipe'] };
   try {
-    execFileSync('heif-thumbnailer', ['-s', String(maxSize), '-p', filePath, tmpPng], { timeout: 15000 });
-    if (fs.existsSync(tmpPng) && fs.statSync(tmpPng).size > 0) {
-      execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', tmpPng, '-q:v', '2', tmpJpg], { timeout: 10000 });
-      try { fs.unlinkSync(tmpPng); } catch (_) {}
+    try {
+      execFileSync('heif-thumbnailer', ['-s', String(maxSize), '-p', filePath, tmpPng], opts);
+      if (fs.existsSync(tmpPng) && fs.statSync(tmpPng).size > 0) {
+        execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', tmpPng, '-q:v', '2', tmpJpg], opts);
+        try { fs.unlinkSync(tmpPng); } catch (_) {}
+        if (fs.existsSync(tmpJpg) && fs.statSync(tmpJpg).size > 0) {
+          return tmpJpg;
+        }
+      }
+    } catch (_) {
+      try { if (fs.existsSync(tmpPng)) fs.unlinkSync(tmpPng); } catch (_) {}
+      // Fallback to heif-convert directly
+      execFileSync('heif-convert', ['-q', '90', filePath, tmpJpg], opts);
       if (fs.existsSync(tmpJpg) && fs.statSync(tmpJpg).size > 0) {
         return tmpJpg;
       }

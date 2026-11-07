@@ -15,11 +15,14 @@ const { isHeicFile, extractHeicThumbnail, convertHeicToJpeg } = require('../util
 
 function extractVideoThumbnail(filePath) {
   const tmpThumb = path.join(os.tmpdir(), `cv_thumb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.jpg`);
+  const opts = { timeout: 10000, stdio: ['ignore', 'pipe', 'pipe'] };
   try {
     try {
-      execFileSync('ffmpeg', ['-v', 'error', '-ss', '00:00:00.5', '-i', filePath, '-vframes', '1', '-vf', 'scale=320:-2', '-q:v', '3', tmpThumb, '-y'], { timeout: 10000 });
+      execFileSync('ffmpeg', ['-v', 'error', '-analyzeduration', '50M', '-probesize', '50M', '-ss', '00:00:00.5', '-i', filePath, '-vframes', '1', '-vf', 'scale=320:-2', '-q:v', '3', tmpThumb, '-y'], opts);
     } catch (_) {
-      execFileSync('ffmpeg', ['-v', 'error', '-ss', '00:00:00', '-i', filePath, '-vframes', '1', '-vf', 'scale=320:-2', '-q:v', '3', tmpThumb, '-y'], { timeout: 10000 });
+      try {
+        execFileSync('ffmpeg', ['-v', 'error', '-analyzeduration', '50M', '-probesize', '50M', '-i', filePath, '-ss', '00:00:00', '-vframes', '1', '-vf', 'scale=320:-2', '-q:v', '3', tmpThumb, '-y'], opts);
+      } catch (_) {}
     }
     if (fs.existsSync(tmpThumb) && fs.statSync(tmpThumb).size > 0) {
       return tmpThumb;
@@ -30,7 +33,7 @@ function extractVideoThumbnail(filePath) {
 
 function probeVideoMeta(filePath) {
   try {
-    const raw = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,duration', '-of', 'default=noprint_wrappers=1:nokey=1', filePath], { timeout: 5000 }).toString().trim().split('\n');
+    const raw = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,duration', '-of', 'default=noprint_wrappers=1:nokey=1', filePath], { timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim().split('\n');
     return {
       w: parseInt(raw[0], 10) || 0,
       h: parseInt(raw[1], 10) || 0,
@@ -485,10 +488,6 @@ async function streamThumbnail(channelId, accessHash, msgId, req, res) {
       if (thumbBuf && thumbBuf.length > 0 && isValidImageBuffer(thumbBuf)) {
         const detectedMime = detectImageMime(thumbBuf) || 'image/jpeg';
         strippedCache.set(cacheKey, { buf: thumbBuf, mime: detectedMime });
-        try {
-          safeMkdirSync(thumbCacheDir);
-          fs.writeFileSync(cacheFilePath, thumbBuf);
-        } catch (_) {}
 
         res.writeHead(200, {
           'Content-Type': detectedMime,
@@ -530,27 +529,6 @@ async function streamThumbnail(channelId, accessHash, msgId, req, res) {
   }
 
   if (isHeicFile(docFileName)) {
-    // Check if preview JPEG exists in disk cache
-    const previewFilePath = path.join(thumbCacheDir, `preview_${cleanChannel}_${msgId}.jpg`);
-    if (fs.existsSync(previewFilePath)) {
-      const thumbJpg = extractHeicThumbnail(previewFilePath, 400);
-      if (thumbJpg && fs.existsSync(thumbJpg)) {
-        const buf = fs.readFileSync(thumbJpg);
-        safeMkdirSync(thumbCacheDir);
-        fs.writeFileSync(cacheFilePath, buf);
-        strippedCache.set(cacheKey, { buf, mime: 'image/jpeg' });
-        try { fs.unlinkSync(thumbJpg); } catch (_) {}
-        res.writeHead(200, {
-          'Content-Type': 'image/jpeg',
-          'Content-Length': buf.length,
-          'Cache-Control': 'public, max-age=604800, immutable',
-          'Access-Control-Allow-Origin': '*',
-        });
-        return res.end(buf);
-      }
-    }
-
-    // Otherwise download message and extract thumbnail
     const tmpHeic = path.join(os.tmpdir(), `dl_heic_th_${Date.now()}_${msgId}.heic`);
     try {
       const client = await getClient();
@@ -559,11 +537,9 @@ async function streamThumbnail(channelId, accessHash, msgId, req, res) {
         const thumbJpg = extractHeicThumbnail(tmpHeic, 400);
         if (thumbJpg && fs.existsSync(thumbJpg)) {
           const buf = fs.readFileSync(thumbJpg);
-          safeMkdirSync(thumbCacheDir);
-          fs.writeFileSync(cacheFilePath, buf);
-          strippedCache.set(cacheKey, { buf, mime: 'image/jpeg' });
           try { fs.unlinkSync(thumbJpg); } catch (_) {}
           try { fs.unlinkSync(tmpHeic); } catch (_) {}
+          strippedCache.set(cacheKey, { buf, mime: 'image/jpeg' });
 
           res.writeHead(200, {
             'Content-Type': 'image/jpeg',
@@ -630,50 +606,40 @@ async function streamMedia(channelId, accessHash, msgId, req, res, forceDownload
   const wantsJpg = req.query && (req.query.format === 'jpg' || req.query.format === 'jpeg');
 
   if (isHeic && (!forceDownload || wantsJpg)) {
-    const cleanChannel = String(channelId).replace(/[^a-zA-Z0-9_-]/g, '');
-    const thumbCacheDir = getThumbnailsDir();
-    const previewFilePath = path.join(thumbCacheDir, `preview_${cleanChannel}_${msgId}.jpg`);
-
-    if (fs.existsSync(previewFilePath) && fs.statSync(previewFilePath).size > 0) {
-      const stats = fs.statSync(previewFilePath);
-      const outName = wantsJpg ? fileName.replace(/\.(heic|heif)$/i, '.jpg') : fileName;
-      res.writeHead(200, {
-        'Content-Type': 'image/jpeg',
-        'Content-Length': stats.size,
-        'Cache-Control': 'public, max-age=604800, immutable',
-        'Content-Disposition': `${disposition}; filename="${encodeURIComponent(outName)}"`,
-        'Access-Control-Allow-Origin': '*',
-      });
-      return fs.createReadStream(previewFilePath).pipe(res);
-    }
-
-    // Generate high-res JPEG preview
     const tmpHeic = path.join(os.tmpdir(), `dl_heic_prev_${Date.now()}_${msgId}.heic`);
+    let prevJpg = null;
     try {
       const client = await getClient();
       await client.downloadMedia(msg, { outputFile: tmpHeic });
       if (fs.existsSync(tmpHeic)) {
-        const prevJpg = convertHeicToJpeg(tmpHeic, 2048);
-        if (prevJpg && fs.existsSync(prevJpg)) {
-          safeMkdirSync(thumbCacheDir);
-          fs.copyFileSync(prevJpg, previewFilePath);
-          try { fs.unlinkSync(prevJpg); } catch (_) {}
-          try { fs.unlinkSync(tmpHeic); } catch (_) {}
+        prevJpg = convertHeicToJpeg(tmpHeic, 2048);
+        try { fs.unlinkSync(tmpHeic); } catch (_) {}
 
-          const stats = fs.statSync(previewFilePath);
+        if (prevJpg && fs.existsSync(prevJpg)) {
+          const stats = fs.statSync(prevJpg);
           const outName = wantsJpg ? fileName.replace(/\.(heic|heif)$/i, '.jpg') : fileName;
           res.writeHead(200, {
             'Content-Type': 'image/jpeg',
             'Content-Length': stats.size,
-            'Cache-Control': 'public, max-age=604800, immutable',
+            'Cache-Control': 'public, max-age=86400',
             'Content-Disposition': `${disposition}; filename="${encodeURIComponent(outName)}"`,
             'Access-Control-Allow-Origin': '*',
           });
-          return fs.createReadStream(previewFilePath).pipe(res);
+
+          const readStream = fs.createReadStream(prevJpg);
+          const cleanup = () => {
+            try { if (prevJpg && fs.existsSync(prevJpg)) fs.unlinkSync(prevJpg); } catch (_) {}
+          };
+          readStream.on('close', cleanup);
+          readStream.on('error', cleanup);
+          res.on('finish', cleanup);
+          res.on('close', cleanup);
+          return readStream.pipe(res);
         }
       }
     } catch (err) {
       console.warn(`[HEIC] Preview conversion error for ${channelId}/${msgId}:`, err.message);
+      try { if (prevJpg && fs.existsSync(prevJpg)) fs.unlinkSync(prevJpg); } catch (_) {}
     } finally {
       try { if (fs.existsSync(tmpHeic)) fs.unlinkSync(tmpHeic); } catch (_) {}
     }
@@ -866,14 +832,6 @@ async function uploadFileToChannel(channelId, accessHash, filePath, originalName
     }
 
     const result = await client.sendFile(peer, sendOptions);
-    if (result && result.id && tmpThumb && fs.existsSync(tmpThumb)) {
-      try {
-        const cleanChannel = String(channelId).replace(/[^a-zA-Z0-9_-]/g, '');
-        const thumbCacheDir = getThumbnailsDir();
-        safeMkdirSync(thumbCacheDir);
-        fs.copyFileSync(tmpThumb, path.join(thumbCacheDir, `thumb_${cleanChannel}_${result.id}.jpg`));
-      } catch (_) {}
-    }
     return result;
   } finally {
     if (tmpThumb && fs.existsSync(tmpThumb)) {

@@ -39,9 +39,9 @@ function cleanOldFilesInDir(dirPath, maxAgeMs) {
  * longer than needed.
  */
 function runStorageCleanup() {
+  const FIVE_MINUTES = 5 * 60 * 1000;
   const TEN_MINUTES = 10 * 60 * 1000;
   const FIFTEEN_MINUTES = 15 * 60 * 1000;
-  const ONE_DAY = 24 * 60 * 60 * 1000;
 
   let totalCleaned = 0;
 
@@ -60,9 +60,9 @@ function runStorageCleanup() {
   totalCleaned += cleanOldFilesInDir(path.join(os.tmpdir(), 'cloudvault', 'tmp'), TEN_MINUTES);
   totalCleaned += cleanOldFilesInDir(path.join(__dirname, '../storage/app/tmp'), TEN_MINUTES);
 
-  // 4. Clean old thumbnails (> 24 hours old)
-  totalCleaned += cleanOldFilesInDir(getThumbnailsDir(), ONE_DAY);
-  totalCleaned += cleanOldFilesInDir(path.join(os.tmpdir(), 'cloudvault', 'thumbnails'), ONE_DAY);
+  // 4. Clean old thumbnails (> 5 mins old)
+  totalCleaned += cleanOldFilesInDir(getThumbnailsDir(), FIVE_MINUTES);
+  totalCleaned += cleanOldFilesInDir(path.join(os.tmpdir(), 'cloudvault', 'thumbnails'), FIVE_MINUTES);
 
   // 5. Clean database upload queue records (completed > 24 hours, failed > 1 hour)
   try {
