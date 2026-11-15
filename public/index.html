@@ -21,6 +21,18 @@
     rel="stylesheet">
   <title>CloudVault - Unlimited Cloud Storage</title>
   <script>
+    (function() {
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      } catch (_) {}
+    })();
+  </script>
+  <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function() {
         navigator.serviceWorker.register('/sw.js').then(function(reg) {
@@ -33,8 +45,8 @@
     }
   </script>
   <script src="/pwa-companion.js" defer></script>
-  <script type="module" crossorigin src="/assets/index-BkU4V2m6.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-CgJ4Zunc.css">
+  <script type="module" crossorigin src="/assets/index-CpjFIQny.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-B5ItKVtz.css">
 </head>
 
 <body>

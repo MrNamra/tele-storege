@@ -412,7 +412,7 @@ function serveFallbackBadge(res, mimeType) {
 function findBestThumb(sizes) {
   if (!Array.isArray(sizes) || sizes.length === 0) return null;
   const validSizes = sizes.filter(
-    (s) => s && (s.className === 'PhotoSize' || s.className === 'PhotoSizeProgressive' || s.className === 'PhotoCachedSize')
+    (s) => s && (s.className === 'PhotoSize' || s.className === 'PhotoSizeProgressive' || s.className === 'PhotoCachedSize' || s.className === 'VideoSize')
   );
   if (validSizes.length === 0) return null;
   // 1. Prefer standard Telegram 'm' thumbnail (~320px, optimal balance of sharp quality & speed)
@@ -427,7 +427,7 @@ function findBestThumb(sizes) {
 }
 
 // Crisp, proper-resolution thumbnail streaming with RAM + disk cache
-async function streamThumbnail(channelId, accessHash, msgId, req, res) {
+async function streamThumbnail(channelId, accessHash, msgId, req, res, bucketId = null, fileId = null) {
   const cacheKey = `${channelId}_${msgId}`;
 
   // 1. Check RAM memory cache
@@ -520,7 +520,7 @@ async function streamThumbnail(channelId, accessHash, msgId, req, res) {
     }
   }
 
-  // 5. If document is a HEIC/HEIF file and Telegram had no thumbnail, generate it via heif-thumbnailer
+  // 5. Inspect filename and mime-type
   let docFileName = '';
   if (msg.document && msg.document.attributes) {
     for (const attr of msg.document.attributes) {
@@ -528,6 +528,12 @@ async function streamThumbnail(channelId, accessHash, msgId, req, res) {
     }
   }
 
+  let mimeType = (msg.document && msg.document.mimeType) || (msg.photo ? 'image/jpeg' : null);
+  if ((!mimeType || mimeType === 'application/octet-stream') && docFileName) {
+    mimeType = mime.lookup(docFileName) || mimeType;
+  }
+
+  // 5a. If document is a HEIC/HEIF file and Telegram had no thumbnail, generate it via heif-thumbnailer
   if (isHeicFile(docFileName)) {
     const tmpHeic = path.join(os.tmpdir(), `dl_heic_th_${Date.now()}_${msgId}.heic`);
     try {
@@ -557,15 +563,50 @@ async function streamThumbnail(channelId, accessHash, msgId, req, res) {
     }
   }
 
-  // 6. Fallback badge if no thumbnail available
-  let mimeType = (msg.document && msg.document.mimeType) || (msg.photo ? 'image/jpeg' : null);
-  if ((!mimeType || mimeType === 'application/octet-stream') && msg.document && msg.document.attributes) {
-    for (const attr of msg.document.attributes) {
-      if (attr.fileName) {
-        mimeType = mime.lookup(attr.fileName) || mimeType;
+  // 5b. If document is a video and Telegram had no thumbnail, extract a crisp frame via ffmpeg range stream
+  const isVideoDoc =
+    (mimeType && mimeType.startsWith('video/')) ||
+    /\.(mov|mp4|m4v|mkv|webm|avi|flv|wmv|ts)$/i.test(docFileName);
+
+  const bId = bucketId || (req && (req.params?.bucket || req.query?.bucket_id));
+  const fId = fileId || (req && (req.params?.id || req.query?.file_id));
+
+  if (isVideoDoc && bId && fId) {
+    const tmpVideoThumb = path.join(os.tmpdir(), `dl_vid_th_${Date.now()}_${msgId}.jpg`);
+    const port = process.env.PORT || 3000;
+    const streamUrl = `http://127.0.0.1:${port}/s/${bId}/${fId}`;
+    const opts = { timeout: 12000, stdio: ['ignore', 'pipe', 'pipe'] };
+
+    try {
+      try {
+        execFileSync('ffmpeg', ['-v', 'error', '-analyzeduration', '10M', '-probesize', '10M', '-ss', '00:00:00.5', '-i', streamUrl, '-vframes', '1', '-vf', 'scale=320:-2', '-q:v', '3', tmpVideoThumb, '-y'], opts);
+      } catch (_) {
+        try {
+          execFileSync('ffmpeg', ['-v', 'error', '-analyzeduration', '10M', '-probesize', '10M', '-ss', '00:00:00', '-i', streamUrl, '-vframes', '1', '-vf', 'scale=320:-2', '-q:v', '3', tmpVideoThumb, '-y'], opts);
+        } catch (_) {}
       }
+
+      if (fs.existsSync(tmpVideoThumb) && fs.statSync(tmpVideoThumb).size > 0) {
+        const buf = fs.readFileSync(tmpVideoThumb);
+        try { fs.unlinkSync(tmpVideoThumb); } catch (_) {}
+        strippedCache.set(cacheKey, { buf, mime: 'image/jpeg' });
+
+        res.writeHead(200, {
+          'Content-Type': 'image/jpeg',
+          'Content-Length': buf.length,
+          'Cache-Control': 'public, max-age=604800, immutable',
+          'Access-Control-Allow-Origin': '*',
+        });
+        return res.end(buf);
+      }
+    } catch (err) {
+      console.warn(`[Thumbnail] Video extraction notice for ${channelId}/${msgId}:`, err.message);
+    } finally {
+      try { if (fs.existsSync(tmpVideoThumb)) fs.unlinkSync(tmpVideoThumb); } catch (_) {}
     }
   }
+
+  // 6. Fallback badge if no thumbnail available
   return serveFallbackBadge(res, mimeType);
 }
 
@@ -865,5 +906,6 @@ module.exports = {
   deleteMessages,
   isHeicFile,
   extractHeicThumbnail,
+  extractVideoThumbnail,
   convertHeicToJpeg,
 };

@@ -346,6 +346,19 @@ const streamThumbnail = async (req, res) => {
             'Access-Control-Allow-Origin': '*',
           });
           return res.end(buf);
+        } else if (/\.(mov|mp4|m4v|mkv|webm|avi|flv|wmv|ts)$/i.test(job.file_name)) {
+          const thumbJpg = telegramService.extractVideoThumbnail(job.file_path);
+          if (thumbJpg && fs.existsSync(thumbJpg)) {
+            const buf = fs.readFileSync(thumbJpg);
+            try { fs.unlinkSync(thumbJpg); } catch (_) {}
+            res.writeHead(200, {
+              'Content-Type': 'image/jpeg',
+              'Content-Length': buf.length,
+              'Cache-Control': 'no-cache',
+              'Access-Control-Allow-Origin': '*',
+            });
+            return res.end(buf);
+          }
         }
       }
     }
@@ -355,7 +368,7 @@ const streamThumbnail = async (req, res) => {
       return res.status(404).json({ status: false, message: 'Invalid thumbnail ID.' });
     }
 
-    return await telegramService.streamThumbnail(bucket.channel_id, bucket.access_hash, msgId, req, res);
+    return await telegramService.streamThumbnail(bucket.channel_id, bucket.access_hash, msgId, req, res, bucket.id, rawId);
   } catch (error) {
     console.error('Stream thumbnail error:', error);
     if (!res.headersSent) {
