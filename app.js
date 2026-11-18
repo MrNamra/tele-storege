@@ -47,6 +47,8 @@ app.use(
       'X-Requested-With',
       'x-bucket-password',
       'x-api-key',
+      'x-immich-user-token',
+      'x-immich-session-token',
       'x-immich-checksum',
       'Depth',
       'Destination',

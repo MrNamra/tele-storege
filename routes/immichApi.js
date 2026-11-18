@@ -107,6 +107,12 @@ function parseCookies(cookieHeader) {
 }
 
 function extractImmichToken(req) {
+  if (req.headers['x-immich-user-token']) {
+    return String(req.headers['x-immich-user-token']).trim();
+  }
+  if (req.headers['x-immich-session-token']) {
+    return String(req.headers['x-immich-session-token']).trim();
+  }
   const authHeader = req.headers.authorization;
   if (authHeader && /^bearer\s+/i.test(authHeader)) {
     return authHeader.replace(/^bearer\s+/i, '').trim();
@@ -118,10 +124,25 @@ function extractImmichToken(req) {
   if (cookies.immich_access_token) {
     return cookies.immich_access_token;
   }
-  if (req.query && (req.query.key || req.query.token)) {
-    return String(req.query.key || req.query.token).trim();
+  if (req.query && (req.query.sessionKey || req.query.apiKey || req.query.key || req.query.token)) {
+    return String(req.query.sessionKey || req.query.apiKey || req.query.key || req.query.token).trim();
   }
   return null;
+}
+
+function uuidv7Now() {
+  const ms = BigInt(Date.now());
+  const buf = crypto.randomBytes(16);
+  buf[0] = Number((ms >> 40n) & 0xffn);
+  buf[1] = Number((ms >> 32n) & 0xffn);
+  buf[2] = Number((ms >> 24n) & 0xffn);
+  buf[3] = Number((ms >> 16n) & 0xffn);
+  buf[4] = Number((ms >> 8n) & 0xffn);
+  buf[5] = Number(ms & 0xffn);
+  buf[6] = (buf[6] & 0x0f) | 0x70;
+  buf[8] = (buf[8] & 0x3f) | 0x80;
+  const h = buf.toString('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
 }
 
 function immichAuth(req, res, next) {
@@ -500,9 +521,15 @@ router.post('/sync/stream', immichAuth, async (req, res) => {
       );
     }
 
+    let cachedAssets = null;
+    const getAssets = async () => {
+      if (!cachedAssets) cachedAssets = await syncUserPhotosBucketToIndex(req.user.id);
+      return cachedAssets;
+    };
+
     if (types.includes('AssetsV2') || types.includes('AssetsV1')) {
       const entityType = types.includes('AssetsV2') ? 'AssetV2' : 'AssetV1';
-      const assets = await syncUserPhotosBucketToIndex(req.user.id);
+      const assets = await getAssets();
       for (const a of assets) {
         writeLine(
           entityType,
@@ -524,8 +551,8 @@ router.post('/sync/stream', immichAuth, async (req, res) => {
             livePhotoVideoId: null,
             stackId: null,
             libraryId: null,
-            width: null,
-            height: null,
+            width: 1000,
+            height: 1000,
             isEdited: false,
           },
           a.id
@@ -533,7 +560,44 @@ router.post('/sync/stream', immichAuth, async (req, res) => {
       }
     }
 
-    writeLine('SyncCompleteV1', {}, 'complete');
+    if (types.includes('AssetExifsV1')) {
+      const assets = await getAssets();
+      for (const a of assets) {
+        writeLine(
+          'AssetExifV1',
+          {
+            assetId: a.id,
+            description: null,
+            exifImageWidth: 1000,
+            exifImageHeight: 1000,
+            fileSizeInByte: Number(a.size || 0),
+            orientation: null,
+            dateTimeOriginal: a.file_created_at,
+            modifyDate: a.file_modified_at,
+            timeZone: 'UTC',
+            latitude: null,
+            longitude: null,
+            projectionType: null,
+            city: null,
+            state: null,
+            country: null,
+            make: null,
+            model: null,
+            lensModel: null,
+            fNumber: null,
+            focalLength: null,
+            iso: null,
+            exposureTime: null,
+            profileDescription: null,
+            rating: null,
+            fps: null,
+          },
+          a.id
+        );
+      }
+    }
+
+    writeLine('SyncCompleteV1', {}, uuidv7Now());
     return res.end();
   } catch (err) {
     console.error('[Immich API] Sync stream error:', err);
