@@ -1,8 +1,12 @@
 frontend/
+public/assets/
 storage-frontend/dist/
 dist/
 build/
 *.min.js
 storage/
+database/
 vendor/
 node_modules/
+.agents/
+graphify-out/

@@ -183,7 +183,9 @@ const dashboard = async (req, res) => {
       return res.status(404).json({ status: false, message: 'User not found.' });
     }
 
-    const buckets = db.prepare('SELECT id, bucketName, created_at FROM buckets WHERE user_id = ? ORDER BY id DESC').all(userId);
+    const buckets = db
+      .prepare("SELECT id, bucketName, created_at FROM buckets WHERE user_id = ? AND COALESCE(kind, 'drive') = 'drive' ORDER BY id DESC")
+      .all(userId);
 
     const bucketList = buckets.map((b) => {
       const share = db.prepare('SELECT code FROM bucket_shares WHERE bucket_id = ?').get(b.id);

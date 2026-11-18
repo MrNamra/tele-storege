@@ -7,6 +7,7 @@
     "dev": "nodemon app.js",
     "test": "node tests/test-server.js",
     "telegram:login": "node scripts/telegram-login.js",
+    "db:backup": "node scripts/backup-db.js",
     "build:frontend": "cd storage-frontend && npm run build",
     "graphify": "graphify update .",
     "graphify:query": "graphify query",

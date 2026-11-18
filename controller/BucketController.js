@@ -67,7 +67,9 @@ const createBucket = async (req, res) => {
 const listBuckets = async (req, res) => {
   try {
     const userId = req.user.id;
-    const buckets = db.prepare('SELECT id, bucketName, created_at FROM buckets WHERE user_id = ? ORDER BY id DESC').all(userId);
+    const buckets = db
+      .prepare("SELECT id, bucketName, created_at FROM buckets WHERE user_id = ? AND COALESCE(kind, 'drive') = 'drive' ORDER BY id DESC")
+      .all(userId);
     const bucketList = buckets.map((b) => {
       const share = db.prepare('SELECT code FROM bucket_shares WHERE bucket_id = ?').get(b.id);
       return {
@@ -99,7 +101,9 @@ const editBucket = async (req, res) => {
       return res.status(422).json({ status: false, message: 'Bucket name is required.' });
     }
 
-    const bucket = db.prepare('SELECT * FROM buckets WHERE id = ? AND user_id = ?').get(bucketId, userId);
+    const bucket = db
+      .prepare("SELECT * FROM buckets WHERE id = ? AND user_id = ? AND COALESCE(kind, 'drive') = 'drive'")
+      .get(bucketId, userId);
     if (!bucket) {
       return res.status(404).json({ status: false, message: 'Bucket not found.' });
     }
@@ -136,7 +140,9 @@ const deleteBucket = async (req, res) => {
     const bucketId = req.params.bucket || req.params.bucketId;
     const userId = req.user.id;
 
-    const bucket = db.prepare('SELECT * FROM buckets WHERE id = ? AND user_id = ?').get(bucketId, userId);
+    const bucket = db
+      .prepare("SELECT * FROM buckets WHERE id = ? AND user_id = ? AND COALESCE(kind, 'drive') = 'drive'")
+      .get(bucketId, userId);
     if (!bucket) {
       return res.status(404).json({ status: false, message: 'Bucket not found.' });
     }

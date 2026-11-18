@@ -10,6 +10,7 @@ const telegramService = require('../services/telegramService');
 const { getTmpDir, getAssembledDir, safeMkdirSync } = require('../utils/storagePaths');
 const { processNextJob } = require('../services/queueService');
 const { safeDecryptId } = require('../utils/crypto');
+const { getUserPhotosBucket, ensureUserPhotosBucket } = require('../utils/photosBucket');
 
 function escapeXml(str) {
   if (!str) return '';
@@ -30,7 +31,22 @@ function parseWebdavPath(req) {
   };
 }
 
-// HTTP Basic Authentication for WebDAV (Windows Explorer, macOS Finder, Linux GVFS)
+async function resolveUserBucket(user, bucketName) {
+  if (!bucketName) return null;
+  let bucket = db
+    .prepare('SELECT * FROM buckets WHERE user_id = ? AND (LOWER(bucketName) = LOWER(?) OR CAST(id AS TEXT) = ?)')
+    .get(user.id, bucketName, String(bucketName));
+
+  if (!bucket && bucketName.toLowerCase() === 'photos') {
+    try {
+      bucket = await ensureUserPhotosBucket(user.id, user.name || user.email);
+    } catch (_) {}
+  }
+
+  return bucket || null;
+}
+
+// HTTP Basic Authentication for WebDAV (Windows Explorer, macOS Finder, Linux GVFS, Mobile WebDAV apps)
 function webdavAuth(req, res, next) {
   res.set({
     'Access-Control-Allow-Origin': '*',
@@ -49,31 +65,34 @@ function webdavAuth(req, res, next) {
   }
 
   const authHeader = req.headers['authorization'];
-  if (!authHeader || !authHeader.startsWith('Basic ')) {
-    res.set('WWW-Authenticate', 'Basic realm="Personal Cloud Drive"');
+  if (!authHeader || !/^basic\s+/i.test(authHeader)) {
+    res.set('WWW-Authenticate', 'Basic realm="Personal Cloud Drive", charset="UTF-8"');
     return res.status(401).send('Authentication required');
   }
 
   try {
-    const credentials = Buffer.from(authHeader.slice(6), 'base64').toString('utf8');
+    const encoded = authHeader.replace(/^basic\s+/i, '').trim();
+    const credentials = Buffer.from(encoded, 'base64').toString('utf8');
     const colonIndex = credentials.indexOf(':');
     if (colonIndex === -1) {
-      res.set('WWW-Authenticate', 'Basic realm="Personal Cloud Drive"');
+      res.set('WWW-Authenticate', 'Basic realm="Personal Cloud Drive", charset="UTF-8"');
       return res.status(401).send('Invalid credentials');
     }
 
-    const email = credentials.slice(0, colonIndex).trim();
+    const email = credentials.slice(0, colonIndex).trim().toLowerCase();
     const password = credentials.slice(colonIndex + 1);
 
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    const user = db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(email);
     if (!user || user.status === 'suspended') {
-      res.set('WWW-Authenticate', 'Basic realm="Personal Cloud Drive"');
+      console.warn(`[WebDAV 401] User not found or suspended: "${email}" on ${req.method} ${req.originalUrl}`);
+      res.set('WWW-Authenticate', 'Basic realm="Personal Cloud Drive", charset="UTF-8"');
       return res.status(401).send('User not found or suspended');
     }
 
     const isValid = bcrypt.compareSync(password, user.password);
     if (!isValid) {
-      res.set('WWW-Authenticate', 'Basic realm="Personal Cloud Drive"');
+      console.warn(`[WebDAV 401] Invalid password for "${email}" on ${req.method} ${req.originalUrl}`);
+      res.set('WWW-Authenticate', 'Basic realm="Personal Cloud Drive", charset="UTF-8"');
       return res.status(401).send('Invalid password');
     }
 
@@ -81,7 +100,7 @@ function webdavAuth(req, res, next) {
     next();
   } catch (err) {
     console.error('[WebDAV] Auth error:', err);
-    res.set('WWW-Authenticate', 'Basic realm="Personal Cloud Drive"');
+    res.set('WWW-Authenticate', 'Basic realm="Personal Cloud Drive", charset="UTF-8"');
     return res.status(401).send('Auth error');
   }
 }
@@ -127,6 +146,12 @@ router.all('*', async (req, res, next) => {
   </D:response>`;
 
       if (depth !== '0') {
+        // Ensure the dedicated Photos folder appears in WebDAV alongside user drives
+        if (!getUserPhotosBucket(req.user.id)) {
+          try {
+            await ensureUserPhotosBucket(req.user.id, req.user.name || req.user.email);
+          } catch (_) {}
+        }
         const buckets = db.prepare('SELECT * FROM buckets WHERE user_id = ? ORDER BY id DESC').all(req.user.id);
         for (const b of buckets) {
           const bHref = `${prefix}/${encodeURIComponent(b.bucketName)}/`;
@@ -147,7 +172,7 @@ router.all('*', async (req, res, next) => {
     }
     // CASE B: Inside a Bucket /webdav/BucketName/ -> list files
     else if (bucketName && !fileName) {
-      const bucket = db.prepare('SELECT * FROM buckets WHERE user_id = ? AND (bucketName = ? OR id = ?)').get(req.user.id, bucketName, bucketName);
+      const bucket = await resolveUserBucket(req.user, bucketName);
       if (!bucket) {
         return res.status(404).end();
       }
@@ -224,7 +249,7 @@ router.all('*', async (req, res, next) => {
     }
     // CASE C: Specific File /webdav/BucketName/fileName
     else {
-      const bucket = db.prepare('SELECT * FROM buckets WHERE user_id = ? AND (bucketName = ? OR id = ?)').get(req.user.id, bucketName, bucketName);
+      const bucket = await resolveUserBucket(req.user, bucketName);
       if (!bucket) return res.status(404).end();
 
       const pending = db.prepare(
@@ -299,9 +324,15 @@ router.all('*', async (req, res, next) => {
       const buckets = db.prepare('SELECT * FROM buckets WHERE user_id = ? ORDER BY id DESC').all(req.user.id);
       let listHtml = '';
       if (!bucketName) {
-        listHtml = buckets.map((b) => `<li>📁 <a href="${prefix}/${encodeURIComponent(b.bucketName)}/">${escapeXml(b.bucketName)}</a></li>`).join('\n');
+        if (!getUserPhotosBucket(req.user.id)) {
+          try {
+            await ensureUserPhotosBucket(req.user.id, req.user.name || req.user.email);
+          } catch (_) {}
+        }
+        const allBuckets = db.prepare('SELECT * FROM buckets WHERE user_id = ? ORDER BY id DESC').all(req.user.id);
+        listHtml = allBuckets.map((b) => `<li><a href="${prefix}/${encodeURIComponent(b.bucketName)}/">${escapeXml(b.bucketName)}</a></li>`).join('\n');
       } else {
-        const bucket = buckets.find((b) => b.bucketName === bucketName || String(b.id) === bucketName);
+        const bucket = await resolveUserBucket(req.user, bucketName);
         if (!bucket) return res.status(404).send('Drive not found');
         const channelData = await telegramService.getChannelFiles(bucket.channel_id, bucket.access_hash, bucket.id, 1, 1000);
         const pendingUploads = db.prepare(
@@ -327,7 +358,7 @@ router.all('*', async (req, res, next) => {
     }
 
     // Specific file requested
-    const bucket = db.prepare('SELECT * FROM buckets WHERE user_id = ? AND (bucketName = ? OR id = ?)').get(req.user.id, bucketName, bucketName);
+    const bucket = await resolveUserBucket(req.user, bucketName);
     if (!bucket) return res.status(404).send('Drive not found');
 
     // If file is still pending/processing in upload queue, stream directly from staged local disk
@@ -417,7 +448,7 @@ router.all('*', async (req, res, next) => {
       return res.status(400).send('Must specify drive and file name for upload');
     }
 
-    const bucket = db.prepare('SELECT * FROM buckets WHERE user_id = ? AND (bucketName = ? OR id = ?)').get(req.user.id, bucketName, bucketName);
+    const bucket = await resolveUserBucket(req.user, bucketName);
     if (!bucket) {
       return res.status(404).send('Destination drive not found');
     }
@@ -477,7 +508,7 @@ router.all('*', async (req, res, next) => {
     const { bucketName, fileName } = parseWebdavPath(req);
     if (!bucketName) return res.status(400).send('Invalid target');
 
-    const bucket = db.prepare('SELECT * FROM buckets WHERE user_id = ? AND (bucketName = ? OR id = ?)').get(req.user.id, bucketName, bucketName);
+    const bucket = await resolveUserBucket(req.user, bucketName);
     if (!bucket) return res.status(404).send('Drive not found');
 
     // Case A: Delete file
@@ -505,6 +536,9 @@ router.all('*', async (req, res, next) => {
     }
 
     // Case B: Delete drive / bucket
+    if (bucket.kind === 'photos') {
+      return res.status(403).send('Photos folder cannot be deleted');
+    }
     try {
       if (bucket.channel_id && bucket.access_hash) {
         await telegramService.deleteChannel(bucket.channel_id, bucket.access_hash);

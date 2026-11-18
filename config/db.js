@@ -92,5 +92,8 @@ try {
 try {
   db.exec('ALTER TABLE upload_queues ADD COLUMN share_code VARCHAR');
 } catch {}
+try {
+  db.exec("ALTER TABLE buckets ADD COLUMN kind VARCHAR NOT NULL DEFAULT 'drive'");
+} catch {}
 
 module.exports = db;

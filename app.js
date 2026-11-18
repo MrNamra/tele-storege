@@ -7,6 +7,7 @@ require('dotenv').config();
 const db = require('./config/db');
 const { startQueueWorker } = require('./services/queueService');
 const { startCleanupWorker } = require('./services/cleanupService');
+const { startDbBackupWorker } = require('./services/dbBackupService');
 const telegramService = require('./services/telegramService');
 
 const authRoutes = require('./routes/auth');
@@ -15,6 +16,9 @@ const fileRoutes = require('./routes/file');
 const uploadRoutes = require('./routes/upload');
 const adminRoutes = require('./routes/admin');
 const webdavRoutes = require('./routes/webdav');
+const immichBridgeRoutes = require('./routes/immichBridge');
+const immichApiRoutes = require('./routes/immichApi');
+const photosRoutes = require('./routes/photos');
 
 const app = express();
 
@@ -25,6 +29,9 @@ app.disable('x-powered-by');
 // Native WebDAV Cloud Drive for Windows Explorer, macOS Finder & Linux Files
 // Mounted first so WebDAV OPTIONS, PROPFIND, and PUT binary streams are untouched by CORS or body parsers
 app.use('/webdav', webdavRoutes);
+
+// Internal Immich -> Telegram storage bridge (mounted before body parsers for raw streaming uploads)
+app.use('/api/immich', immichBridgeRoutes);
 
 // CORS configuration (crucial for streaming Range requests & cross-origin previews)
 app.use(
@@ -39,6 +46,8 @@ app.use(
       'Accept',
       'X-Requested-With',
       'x-bucket-password',
+      'x-api-key',
+      'x-immich-checksum',
       'Depth',
       'Destination',
       'If-Modified-Since',
@@ -58,12 +67,15 @@ app.options('*', cors());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
-// 1. Root level media & streaming routes (matching Laravel root routes: /s/..., /t/..., /d/...)
+// 1. Root level media, discovery & streaming routes
+app.get('/.well-known/immich', (_req, res) => res.json({ api: { endpoint: '/api' } }));
 app.use('/', fileRoutes);
 
 // 2. API Routes
 app.use('/api', authRoutes);
 app.use('/api/bucket', bucketRoutes);
+app.use('/api/photos', photosRoutes);
+app.use('/api', immichApiRoutes);
 app.use('/api', fileRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/admin', adminRoutes);
@@ -138,6 +150,8 @@ if (require.main === module) {
   startQueueWorker();
   // Start automated storage cleanup worker (purges temp files and old chunks every 5 mins)
   startCleanupWorker();
+  // Start automated 24h SQLite backup worker (uploads compressed snapshot to db_backup channel)
+  startDbBackupWorker();
 
   const PORT = process.env.PORT || 3000;
   const server = app.listen(PORT, () => {
